@@ -1,0 +1,28 @@
+{
+  "name": "payguard-agent",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "workspaces": [
+    "apps/*",
+    "services/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace @payguard/web",
+    "dev:web": "npm run dev --workspace @payguard/web",
+    "dev:api": "npm run dev --workspace @payguard/api",
+    "build": "npm run build --workspace @payguard/protocol && npm run build --workspace @payguard/api && npm run build --workspace @payguard/web",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "contract:build": "stellar contract build --package payguard-gatekeeper",
+    "test": "npm run typecheck && cargo test --workspace"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4"
+  }
+}
+

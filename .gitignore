@@ -1,0 +1,11 @@
+node_modules/
+dist/
+dist-ts/
+target/
+.env
+.env.local
+*.log
+temp/
+.agents/
+skills-lock.json
+.DS_Store
