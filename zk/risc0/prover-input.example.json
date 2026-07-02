@@ -1,0 +1,25 @@
+{
+  "policy": {
+    "name": "DAO Treasury Agent",
+    "maxPerPayment": "50",
+    "dailyLimit": "500",
+    "allowlist": [
+      "GBTZAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAX4K2",
+      "GBZQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAM7R3"
+    ],
+    "expiry": "2026-07-15",
+    "salt": "payguard-demo-salt"
+  },
+  "intent": {
+    "recipient": "GBTZAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAX4K2",
+    "amount": "30",
+    "asset": "USDC",
+    "category": "api",
+    "memo": "PayGuard intent: api",
+    "rationale": "Recipient is allowlisted and the requested payment can be checked against the private policy.",
+    "riskLevel": "low"
+  },
+  "spentToday": "135",
+  "vaultBalance": "840",
+  "proofDate": "2026-07-02"
+}
