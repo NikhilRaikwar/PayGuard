@@ -27,8 +27,11 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 
 RUN curl -L https://risczero.com/install | bash
 
-RUN rzup install
-RUN rzup install risc0-groth16
+RUN --mount=type=secret,id=GITHUB_TOKEN \
+    export GITHUB_TOKEN=$(cat /run/secrets/GITHUB_TOKEN) && \
+    rzup install && \
+    rzup install risc0-groth16
+
 
 WORKDIR /app
 
