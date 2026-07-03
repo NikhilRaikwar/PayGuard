@@ -30,9 +30,29 @@ import {
   shortAddress,
   type PaymentIntent,
   type PolicyDefinition,
-  ViolationCode
+  ViolationCode,
+  sha256Hex,
+  hexToBytes,
+  bytesToHex
 } from "@payguard/protocol";
-import { apiStatus, connectFreighter, env, restoreFreighter, rpcHealth, stellarExpertTx } from "./stellar";
+import * as StellarSdk from "@stellar/stellar-sdk";
+import {
+  apiStatus,
+  connectFreighter,
+  env,
+  restoreFreighter,
+  rpcHealth,
+  stellarExpertTx,
+  buildContractCall,
+  signAndSubmit,
+  scBytes32,
+  scAddress,
+  scI128,
+  getNetworkHash,
+  executeDecision,
+  getPolicyState,
+  getPolicyStats
+} from "./stellar";
 
 type View = "dashboard" | "agent" | "policy-builder" | "policies" | "proof-log" | "settings";
 type EventRow = {
@@ -60,12 +80,17 @@ const defaultPolicy: PolicyDefinition = {
   salt: "payguard-demo-salt"
 };
 
-const seedEvents: EventRow[] = [
-  { id: "v1", time: "14:32", recipient: vendorA, amount: "45", status: "VERIFIED", violation: "-", proof: "0x9c3e...d41f", txHash: "" },
-  { id: "v2", time: "14:18", recipient: vendorB, amount: "30", status: "VERIFIED", violation: "-", proof: "0x1a2b...c9f0", txHash: "" },
-  { id: "b1", time: "13:45", recipient: unknownVendor, amount: "80", status: "BLOCKED", violation: "max_per_tx", proof: "0xdenial...8f10", txHash: "" },
-  { id: "b2", time: "11:15", recipient: unknownVendor, amount: "25", status: "BLOCKED", violation: "allowlist", proof: "0xdenial...4420", txHash: "" }
-];
+const seedEvents: EventRow[] = [];
+
+async function computePolicyId(policyHash: string, salt: string): Promise<string> {
+  const hashBytes = hexToBytes(policyHash);
+  const saltHash = await sha256Hex(salt);
+  const saltBytes = hexToBytes(saltHash);
+  const preimage = new Uint8Array(64);
+  preimage.set(hashBytes, 0);
+  preimage.set(saltBytes, 32);
+  return sha256Hex(preimage);
+}
 
 export function App() {
   const [inApp, setInApp] = useState(location.hash === "#app");
@@ -79,6 +104,30 @@ export function App() {
   const [health, setHealth] = useState<{ ok: boolean; status: string; ledger: number | null }>({ ok: false, status: "checking", ledger: null });
   const [api, setApi] = useState<ApiStatus>({ ok: false, openai: false, realProverConfigured: false, contractId: env.contractId, verifierContractId: env.verifierContractId, tokenContractId: env.tokenContractId });
 
+  const [activePolicy, setActivePolicy] = useState<PolicyDefinition | null>(() => {
+    const saved = localStorage.getItem("payguard.activePolicy");
+    return saved ? JSON.parse(saved) : null;
+  });
+  const [activePolicyHash, setActivePolicyHash] = useState("");
+  const [vaultBalance, setVaultBalance] = useState("0");
+  const [spentToday, setSpentToday] = useState("0");
+  const [initialVault, setInitialVault] = useState("1000");
+
+  async function refreshOnChainState() {
+    if (!wallet || !env.contractId || !activePolicy) return;
+    try {
+      const activeHash = await hashPolicy(activePolicy);
+      const policyId = await computePolicyId(activeHash, activePolicy.salt);
+      const state = await getPolicyState(policyId);
+      if (state) {
+        setVaultBalance(formatUsdc(BigInt(state.vault_balance)));
+        setSpentToday(formatUsdc(BigInt(state.spent)));
+      }
+    } catch (err) {
+      console.warn("Failed to load on-chain policy state:", err);
+    }
+  }
+
   useEffect(() => {
     restoreFreighter().then(setWallet).catch(() => undefined);
     rpcHealth().then(setHealth);
@@ -88,6 +137,20 @@ export function App() {
   useEffect(() => {
     hashPolicy(policy).then(setPolicyHash).catch((error) => setPolicyHash(`invalid:${error.message}`));
   }, [policy]);
+
+  useEffect(() => {
+    if (activePolicy) {
+      hashPolicy(activePolicy).then(setActivePolicyHash).catch(() => setActivePolicyHash(""));
+    } else {
+      setActivePolicyHash("");
+      setVaultBalance("0");
+      setSpentToday("0");
+    }
+  }, [activePolicy]);
+
+  useEffect(() => {
+    refreshOnChainState();
+  }, [wallet, activePolicy]);
 
   function notify(message: string, tone: "success" | "warn" | "error" | "info" = "success") {
     setToast({ message, tone });
@@ -114,7 +177,123 @@ export function App() {
   function disconnect() {
     localStorage.removeItem("payguard.walletConnected");
     setWallet(null);
+    setInApp(false);
+    location.hash = "";
     notify("Wallet disconnected", "warn");
+  }
+
+  async function deployPolicy() {
+    if (!wallet) {
+      notify("Please connect your wallet first", "warn");
+      return;
+    }
+    if (!env.contractId) {
+      notify("VITE_PAYGUARD_CONTRACT_ID is not configured", "error");
+      return;
+    }
+
+    notify("Registering policy on-chain...", "info");
+    try {
+      const pHash = await hashPolicy(policy);
+      const pHashBytes = scBytes32(pHash);
+      const saltHash = await sha256Hex(policy.salt);
+      const saltBytes = scBytes32(saltHash);
+
+      const ownerVal = scAddress(wallet.address);
+      const executorVal = scAddress(wallet.address);
+
+      const tokenAddress = env.tokenContractId || "CDLZFC3SYJYD5765ZP65CH3N4ZPP7QCQPVEAW57KYN22A2KU2C64VUT7";
+      const tokenVal = scAddress(tokenAddress);
+
+      const xdr = await buildContractCall({
+        source: wallet.address,
+        contractId: env.contractId,
+        method: "register_policy",
+        args: [ownerVal, executorVal, tokenVal, pHashBytes, saltBytes]
+      });
+
+      notify("Please sign the transaction in Freighter...", "info");
+      await signAndSubmit(xdr);
+
+      const policyId = await computePolicyId(pHash, policy.salt);
+      notify(`Policy deployed! ID: ${shortAddress(policyId)}`, "success");
+
+      localStorage.setItem("payguard.activePolicy", JSON.stringify(policy));
+      setActivePolicy(policy);
+      setVaultBalance(initialVault);
+      setSpentToday("0");
+      setView("dashboard");
+      await refreshOnChainState();
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Failed to deploy policy", "error");
+    }
+  }
+
+  async function revokePolicy() {
+    if (!window.confirm("Revoke this policy? Soroban will immediately reject all future payments and return vault funds.")) return;
+    try {
+      if (wallet && env.contractId && activePolicy) {
+        notify("Revoking policy on-chain...", "info");
+        const activeHash = await hashPolicy(activePolicy);
+        const policyId = await computePolicyId(activeHash, activePolicy.salt);
+        const policyIdBytes = scBytes32(policyId);
+
+        const xdr = await buildContractCall({
+          source: wallet.address,
+          contractId: env.contractId,
+          method: "set_policy_active",
+          args: [policyIdBytes, StellarSdk.nativeToScVal(false)]
+        });
+        await signAndSubmit(xdr);
+        notify("Policy successfully deactivated on Soroban", "success");
+      } else {
+        notify("Policy draft revoked locally", "warn");
+      }
+      localStorage.removeItem("payguard.activePolicy");
+      setActivePolicy(null);
+      setVaultBalance("0");
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Revocation failed", "error");
+    }
+  }
+
+  async function fundPolicy() {
+    if (!wallet) {
+      notify("Please connect your wallet first", "warn");
+      return;
+    }
+    const amountStr = window.prompt("Enter amount of USDC to fund policy vault:", "100");
+    if (!amountStr) return;
+    try {
+      const amountBig = parseUsdc(amountStr);
+      if (env.contractId && activePolicy && activePolicyHash) {
+        notify("Funding policy on-chain...", "info");
+        const policyId = await computePolicyId(activePolicyHash, activePolicy.salt);
+        const policyIdBytes = scBytes32(policyId);
+        const fromVal = scAddress(wallet.address);
+
+        const xdr = await buildContractCall({
+          source: wallet.address,
+          contractId: env.contractId,
+          method: "fund_policy",
+          args: [policyIdBytes, fromVal, scI128(amountBig)]
+        });
+        await signAndSubmit(xdr);
+        notify("Vault successfully funded on Soroban", "success");
+        await refreshOnChainState();
+      } else {
+        setVaultBalance((prev) => String(Number(prev) + Number(amountStr)));
+        notify(`Vault funded locally with ${amountStr} USDC`, "success");
+      }
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Funding failed", "error");
+    }
+  }
+
+  function saveDraft() {
+    localStorage.setItem("payguard.activePolicy", JSON.stringify(policy));
+    setActivePolicy(policy);
+    notify("Policy draft saved locally", "success");
   }
 
   if (!inApp) return <Landing connect={connect} connecting={connecting} />;
@@ -126,13 +305,24 @@ export function App() {
           <span className="sb-logo-icon"><ShieldCheck size={15} /></span>
           <span className="sb-logo-name">PayGuard<span> Agent</span></span>
         </button>
-        <SideNav view={view} setView={setView} />
+        <SideNav view={view} setView={setView} setPolicy={setPolicy} setInitialVault={setInitialVault} />
         <div className="sb-wallet">
           <div className="sb-wallet-card wallet-menu">
             <div className="swc-label">Connected wallet</div>
-            <div className="swc-addr">{wallet ? shortAddress(wallet.address) : "Connect required"}</div>
-            <div className="swc-net"><span className="swc-net-dot" /> {wallet?.network || "Stellar testnet"}</div>
-            {wallet && <button className="wallet-disconnect" onClick={disconnect}><LogOut size={13} /> Disconnect wallet</button>}
+            {wallet ? (
+              <>
+                <div className="swc-addr">{shortAddress(wallet.address)}</div>
+                <div className="swc-net"><span className="swc-net-dot" /> {wallet.network}</div>
+                <button className="wallet-disconnect" onClick={disconnect}><LogOut size={13} /> Disconnect wallet</button>
+              </>
+            ) : (
+              <>
+                <div className="swc-addr" style={{ color: "var(--ink4)" }}>Disconnected</div>
+                <button className="wallet-connect-btn" onClick={connect} disabled={connecting} style={{ marginTop: "10px", width: "100%", background: "var(--amber)", color: "var(--ink)", padding: "6px 8px", borderRadius: "6px", fontWeight: "600", fontSize: "12px", textAlign: "center", display: "block", border: "none", cursor: "pointer" }}>
+                  {connecting ? "Connecting..." : "Connect wallet"}
+                </button>
+              </>
+            )}
           </div>
         </div>
       </aside>
@@ -146,15 +336,64 @@ export function App() {
           </div>
         </header>
         <section className="content">
-          {view === "dashboard" && <Dashboard policyHash={policyHash} events={events} health={health} api={api} setView={setView} />}
-          {view === "agent" && <AgentConsole policy={policy} policyHash={policyHash} events={events} setEvents={setEvents} notify={notify} api={api} />}
-          {view === "policy-builder" && <PolicyBuilder policy={policy} setPolicy={setPolicy} policyHash={policyHash} notify={notify} />}
-          {view === "policies" && <Policies policy={policy} policyHash={policyHash} />}
+          {view === "dashboard" && (
+            <Dashboard
+              policy={activePolicy}
+              policyHash={activePolicyHash}
+              events={events}
+              health={health}
+              api={api}
+              setView={setView}
+              vaultBalance={vaultBalance}
+              spentToday={spentToday}
+              revokePolicy={revokePolicy}
+              fundPolicy={fundPolicy}
+              setPolicy={setPolicy}
+              setInitialVault={setInitialVault}
+            />
+          )}
+          {view === "agent" && (
+            <AgentConsole
+              policy={activePolicy}
+              policyHash={activePolicyHash}
+              events={events}
+              setEvents={setEvents}
+              notify={notify}
+              api={api}
+              spentToday={spentToday}
+              vaultBalance={vaultBalance}
+              setSpentToday={setSpentToday}
+              setVaultBalance={setVaultBalance}
+              wallet={wallet}
+            />
+          )}
+          {view === "policy-builder" && (
+            <PolicyBuilder
+              policy={policy}
+              setPolicy={setPolicy}
+              policyHash={policyHash}
+              notify={notify}
+              deployPolicy={deployPolicy}
+              saveDraft={saveDraft}
+              initialVault={initialVault}
+              setInitialVault={setInitialVault}
+            />
+          )}
+          {view === "policies" && (
+            <Policies
+              policy={activePolicy}
+              policyHash={activePolicyHash}
+              setView={setView}
+              setPolicy={setPolicy}
+              setInitialVault={setInitialVault}
+              revokePolicy={revokePolicy}
+              vaultBalance={vaultBalance}
+            />
+          )}
           {view === "proof-log" && <ProofLog events={events} notify={notify} />}
           {view === "settings" && <Settings wallet={wallet} disconnect={disconnect} health={health} api={api} />}
         </section>
       </main>
-      {!wallet && <WalletOverlay connect={connect} connecting={connecting} />}
       {toast && <div id="toast" className="show"><span className={`t-icon ${toast.tone}`} /> <span>{toast.message}</span></div>}
     </div>
   );
@@ -187,16 +426,20 @@ function Landing({ connect, connecting }: { connect: () => void; connecting: boo
       <section className="hero">
         <div>
           <div className="hero-tag"><span className="hero-tag-dot" /> STELLAR REAL-WORLD ZK</div>
-          <h1>Private rules for<br />AI payments,<br /><em>proven on Stellar.</em></h1>
-          <p className="hero-sub">PayGuard Agent lets teams delegate payments to AI without exposing internal budgets, vendor lists, or spend policies. Every payment needs a zero-knowledge proof before Stellar releases funds.</p>
-          <div className="hero-actions">
-            <button className="btn-hero-primary" onClick={connect} disabled={connecting}>{connecting ? "Connecting wallet" : "Connect wallet and start"} <ArrowRight size={16} /></button>
-            <a className="btn-hero-secondary" href="#how">See proof flow</a>
+          <h1>AI agents can propose payments.<br /><em>Only math can approve them.</em></h1>
+          <p className="hero-sub">PayGuard Agent enforces your spending rules with zero-knowledge proofs on Stellar — before any token moves.<br />Private limits, allowlists & budgets required. Proof passed, or payment blocked.</p>
+          <div className="hero-actions" style={{ display: "flex", gap: "12px", flexWrap: "nowrap", alignItems: "center", marginBottom: "48px" }}>
+            <button className="btn-hero-primary" onClick={connect} disabled={connecting} style={{ whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: "8px" }}>
+              <Wallet size={15} /> Connect wallet & start
+            </button>
+            <a className="btn-hero-secondary" href="#how" style={{ whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: "6px" }}>
+              See the full proof flow &rarr;
+            </a>
           </div>
-          <div className="hero-trust">
-            <Trust text="Policy hash only on-chain" />
-            <Trust text="RISC Zero proof path" />
-            <Trust text="Stellar testnet" />
+          <div className="hero-trust" style={{ display: "flex", gap: "16px", flexWrap: "nowrap", whiteSpace: "nowrap" }}>
+            <Trust text="RISC Zero zkVM" />
+            <Trust text="Groth16 ZK (CAP-0059)" />
+            <Trust text="Soroban Gatekeeper" />
           </div>
         </div>
         <div className="pipeline-card">
@@ -223,7 +466,7 @@ function Landing({ connect, connecting }: { connect: () => void; connecting: boo
         <div className="section-w">
           <div className="s-eyebrow">How it works</div>
           <h2 className="s-title">Four steps from rule<br />to proof to payment</h2>
-          <p className="s-sub">Your rules are never stored on-chain. Only a cryptographic fingerprint is. Everything else stays private to you.</p>
+          <p className="s-sub">Your rules never touch the blockchain. Only a cryptographic fingerprint is stored on Stellar.</p>
           <div className="how-grid">
             <div className="how-steps">
               {["Set your spending rules", "Deploy a rule fingerprint", "Agent proposes a payment", "Stellar enforces the outcome"].map((title, index) => (
@@ -244,12 +487,20 @@ function Landing({ connect, connecting }: { connect: () => void; connecting: boo
       <section className="cta-section">
         <div className="cta-box">
           <h2>Your agents pay.<br /><em>Math enforces the rules.</em></h2>
-          <p>Connect a Stellar wallet to deploy your first payment policy. No account, no email - just your wallet and your rules.</p>
+          <p>Connect a Stellar wallet to deploy your first payment policy. No account, no email — just your wallet and your rules.</p>
           <button className="btn-cta-big" onClick={connect} disabled={connecting}><Lock size={16} /> {connecting ? "Connecting wallet" : "Connect wallet and start"}</button>
           <p className="cta-note">Non-custodial - Stellar testnet - Open source - MIT license</p>
         </div>
       </section>
-      <footer><div className="footer-w"><span className="fl-name">PayGuard<span> Agent</span></span><span className="footer-note">Stellar Hacks: Real-World ZK - 2026 - MIT</span></div></footer>
+      <footer>
+        <div className="footer-w">
+          <span className="fl-name">PayGuard<span> Agent</span></span>
+          <span style={{ fontSize: "12px", color: "rgba(255, 255, 255, 0.4)", fontFamily: "var(--sans)" }}>
+            Private rules. Public verification. Real-World ZK on Stellar.
+          </span>
+          <span className="footer-note">Submitted for Stellar Hacks: Real-World ZK 2026</span>
+        </div>
+      </footer>
     </div>
   );
 }
@@ -303,8 +554,34 @@ function HowPanel({ panel }: { panel: number }) {
   return <div className="hp-body"><div className="result-row pass"><CheckCircle2 /> Payment approved - proof verified</div><div className="result-row block"><XCircle /> Payment blocked - no funds moved</div><HashBox label="PROOF DIGEST - on Stellar" value="0x9c3e4b1d8f0a2e6b9c4f...d41f" /></div>;
 }
 
-function MiniRules() {
-  return <><div className="mini-label">Your private rules (local only)</div><div className="dark-row"><span className="dr-name">Max per payment</span><span className="dr-val">&lt;= $50</span></div><div className="dark-row"><span className="dr-name">Daily budget</span><span className="dr-val">&lt;= $200</span></div><div className="dark-row"><span className="dr-name">Allowed vendors</span><span className="dr-val">2 addresses</span></div><HashBox label="POLICY FINGERPRINT - on Stellar only" value="0x7f2a9c3e4b1d8f0a2e6b9c4f7a3d1e8b" /></>;
+function MiniRules({ policy, policyHash = "0x7f2a9c3e4b1d8f0a2e6b9c4f7a3d1e8b" }: { policy?: PolicyDefinition | null; policyHash?: string }) {
+  const activePolicy = policy === undefined ? defaultPolicy : policy;
+  if (!activePolicy) {
+    return (
+      <>
+        <div className="mini-label">Your private rules (local only)</div>
+        <div style={{ padding: "10px 0", color: "var(--ink4)", fontSize: "13px" }}>No active policy configured.</div>
+      </>
+    );
+  }
+  return (
+    <>
+      <div className="mini-label">Your private rules (local only)</div>
+      <div className="dark-row">
+        <span className="dr-name">Max per payment</span>
+        <span className="dr-val">&le; ${activePolicy.maxPerPayment || "0"} USDC</span>
+      </div>
+      <div className="dark-row">
+        <span className="dr-name">Daily budget</span>
+        <span className="dr-val">&le; ${activePolicy.dailyLimit || "0"} USDC</span>
+      </div>
+      <div className="dark-row">
+        <span className="dr-name">Allowed vendors</span>
+        <span className="dr-val">{activePolicy.allowlist.length} {activePolicy.allowlist.length === 1 ? "address" : "addresses"}</span>
+      </div>
+      <HashBox label="POLICY FINGERPRINT - on Stellar only" value={policyHash || "calculating"} />
+    </>
+  );
 }
 
 function HashBox({ label, value }: { label: string; value: string }) {
@@ -313,17 +590,70 @@ function HashBox({ label, value }: { label: string; value: string }) {
 
 function FeatureSections() {
   const features = [
-    ["Visual rule builder", "Set spending limits, approved vendors and expiry dates. Your rules stay on your device.", "No code required"],
+    ["Visual rule builder", "Set spending limits, approved vendors and expiry dates. Your rules stay on your device.", "No smart contract coding required"],
     ["Cryptographic enforcement", "Every payment decision is represented as a proof-bound public journal for Stellar verification.", "RISC Zero - Groth16"],
     ["AI agent payments", "Paste a task or invoice. The agent proposes a structured payment that policy checks can enforce.", "OpenAI - structured intent"],
     ["Proof audit log", "Approved and blocked payments are recorded with proof digests and exportable CSV evidence.", "Tamper-proof"],
     ["Instant kill switch", "Disable an agent policy and block all future payment execution.", "Revoke instantly"],
     ["Stellar-native", "Designed around Stellar testnet, SAC token transfers and protocol ZK primitives.", "Protocol 25 - 26"]
   ];
-  return <><section className="section feat-section" id="features"><div className="section-w"><div className="s-eyebrow">Everything included</div><h2 className="s-title">Built for teams that delegate<br />payments to AI</h2><p className="s-sub">Every part of PayGuard Agent is designed around one principle: your rules are enforced by math, not trust.</p><div className="feat-grid">{features.map((f, i) => <article className="feat-card" key={f[0]}><div className="fc-icon">{[<FileText />, <Shield />, <Bot />, <Activity />, <PauseCircle />, <Zap />][i]}</div><div className="fc-t">{f[0]}</div><p className="fc-d">{f[1]}</p><span className="fc-tag">{f[2]}</span></article>)}</div></div></section><section className="section flow-section"><div className="section-w"><div className="s-eyebrow">Under the hood</div><h2 className="s-title">Every payment,<br />every proof, every time</h2><p className="s-sub">From agent proposal to on-chain settlement - five steps, no shortcuts.</p><div className="flow-grid">{["Agent proposes", "Rules evaluate", "Proof generated", "Stellar verifies", "Approved or blocked"].map((x, i) => <div className="flow-step" key={x}><div className="fs-num">{i + 1}</div><div className="fs-t">{x}</div><p className="fs-d">Step {i + 1} in the proof-gated payment lifecycle.</p></div>)}</div></div></section></>;
+  const steps = [
+    ["Agent Proposes", "Agent proposes a structured payment intent"],
+    ["Rules Evaluate", "Private rules evaluated in ZK"],
+    ["Proof Generated", "Zero-knowledge proof generated"],
+    ["Stellar Verifies", "Soroban smart contract verifies proof"],
+    ["Approved or Blocked", "Payment approved or blocked on Stellar"]
+  ];
+  return (
+    <>
+      <section className="section feat-section" id="features">
+        <div className="section-w">
+          <div className="s-eyebrow">Everything included</div>
+          <h2 className="s-title">Built for teams that delegate<br />payments to AI</h2>
+          <p className="s-sub">Every part of PayGuard Agent is designed around one principle: your rules are enforced by math, not trust.</p>
+          <div className="feat-grid">
+            {features.map((f, i) => (
+              <article className="feat-card" key={f[0]}>
+                <div className="fc-icon">{[<FileText />, <Shield />, <Bot />, <Activity />, <PauseCircle />, <Zap />][i]}</div>
+                <div className="fc-t">{f[0]}</div>
+                <p className="fc-d">{f[1]}</p>
+                <span className="fc-tag">{f[2]}</span>
+              </article>
+            ))}
+          </div>
+        </div>
+      </section>
+      <section className="section flow-section">
+        <div className="section-w">
+          <div className="s-eyebrow">Under the hood</div>
+          <h2 className="s-title">Every payment,<br />every proof, every time</h2>
+          <p className="s-sub">From agent proposal to on-chain settlement - five steps, no shortcuts.</p>
+          <div className="flow-grid">
+            {steps.map((step, i) => (
+              <div className="flow-step" key={step[0]}>
+                <div className="fs-num">{i + 1}</div>
+                <div className="fs-t">{step[0]}</div>
+                <p className="fs-d">{step[1]}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+    </>
+  );
 }
 
-function SideNav({ view, setView }: { view: View; setView: (view: View) => void }) {
+function SideNav({
+  view,
+  setView,
+  setPolicy,
+  setInitialVault
+}: {
+  view: View;
+  setView: (view: View) => void;
+  setPolicy?: (p: PolicyDefinition) => void;
+  setInitialVault?: (v: string) => void;
+}) {
   return <>
     <div className="sb-section">
       <div className="sb-section-label">Overview</div>
@@ -332,12 +662,32 @@ function SideNav({ view, setView }: { view: View; setView: (view: View) => void 
     </div>
     <div className="sb-section">
       <div className="sb-section-label">Policies</div>
-      <button className={`sb-item ${view === "policy-builder" ? "active" : ""}`} onClick={() => setView("policy-builder")}><Plus className="sb-icon" />New Policy</button>
-      <button className={`sb-item ${view === "policies" ? "active" : ""}`} onClick={() => setView("policies")}><KeyRound className="sb-icon" />My Policies<span className="sb-badge green">1</span></button>
+      <button
+        className={`sb-item ${view === "policy-builder" ? "active" : ""}`}
+        onClick={() => {
+          if (setPolicy) {
+            setPolicy({
+              name: "",
+              maxPerPayment: "",
+              dailyLimit: "",
+              allowlist: [],
+              expiry: "",
+              salt: `salt-${Math.random().toString(36).substring(2, 10)}`
+            });
+          }
+          if (setInitialVault) {
+            setInitialVault("");
+          }
+          setView("policy-builder");
+        }}
+      >
+        <Plus className="sb-icon" />New Policy
+      </button>
+      <button className={`sb-item ${view === "policies" ? "active" : ""}`} onClick={() => setView("policies")}><KeyRound className="sb-icon" />My Policies</button>
     </div>
     <div className="sb-section">
       <div className="sb-section-label">Activity</div>
-      <button className={`sb-item ${view === "proof-log" ? "active" : ""}`} onClick={() => setView("proof-log")}><Activity className="sb-icon" />Proof Log<span className="sb-badge red">2</span></button>
+      <button className={`sb-item ${view === "proof-log" ? "active" : ""}`} onClick={() => setView("proof-log")}><Activity className="sb-icon" />Proof Log</button>
     </div>
     <div className="sb-section">
       <div className="sb-section-label">System</div>
@@ -350,50 +700,170 @@ function pageTitle(view: View) {
   return ({ dashboard: "Dashboard", agent: "Ask Agent", "policy-builder": "New Policy", policies: "My Policies", "proof-log": "Proof Log", settings: "Settings" } as Record<View, string>)[view];
 }
 
-function Dashboard({ policyHash, events, health, api, setView }: { policyHash: string; events: EventRow[]; health: { ok: boolean; status: string; ledger: number | null }; api: ApiStatus; setView: (view: View) => void }) {
+function Dashboard({
+  policy,
+  policyHash,
+  events,
+  health,
+  api,
+  setView,
+  vaultBalance,
+  spentToday,
+  revokePolicy,
+  fundPolicy,
+  setPolicy,
+  setInitialVault
+}: {
+  policy: PolicyDefinition | null;
+  policyHash: string;
+  events: EventRow[];
+  health: { ok: boolean; status: string; ledger: number | null };
+  api: ApiStatus;
+  setView: (view: View) => void;
+  vaultBalance: string;
+  spentToday: string;
+  revokePolicy: () => void;
+  fundPolicy: () => void;
+  setPolicy: (p: PolicyDefinition) => void;
+  setInitialVault: (v: string) => void;
+}) {
   const verified = events.filter((e) => e.status === "VERIFIED").length;
   const blocked = events.filter((e) => e.status === "BLOCKED").length;
   return <>
     <div className="stat-grid">
-      <Stat label="Vault balance" value="840" sub="USDC - testnet" badge="Funded" />
-      <Stat label="Today's spend" value="165" sub="USDC of 500 limit" badge="33%" />
-      <Stat label="Payments approved" value={String(Math.max(9, verified))} sub="since policy deployed" badge="All proven" />
-      <Stat label="Payments blocked" value={String(Math.max(3, blocked))} sub="violations caught" badge="Recorded on-chain" tone="red" />
+      <div className="stat-card">
+        <span className="sc-label">Vault balance</span>
+        <strong className="sc-val">{vaultBalance}</strong>
+        <span className="sc-sub" style={{ fontFamily: "var(--mono)", color: "var(--ink3)" }}>USDC · testnet</span>
+        <span className="sc-badge green" style={{ marginTop: "8px" }}>● {Number(vaultBalance) > 0 ? "Funded" : "Empty"}</span>
+      </div>
+      <div className="stat-card">
+        <span className="sc-label">Today's spend</span>
+        <strong className="sc-val">{spentToday}</strong>
+        <span className="sc-sub" style={{ fontFamily: "var(--mono)", color: "var(--ink3)" }}>USDC of {policy?.dailyLimit || "0"} limit</span>
+        <div style={{ marginTop: "8px", height: "4px", background: "var(--c3)", borderRadius: "2px", overflow: "hidden" }}>
+          <div style={{ height: "100%", width: `${Math.min(100, (Number(spentToday) / (Number(policy?.dailyLimit) || 1)) * 100)}%`, background: "var(--amber)", borderRadius: "2px" }} />
+        </div>
+      </div>
+      <div className="stat-card">
+        <span className="sc-label">Payments approved</span>
+        <strong className="sc-val">{verified}</strong>
+        <span className="sc-sub">since policy deployed</span>
+        <span className="sc-badge green" style={{ marginTop: "8px" }}>● All proven</span>
+      </div>
+      <div className="stat-card">
+        <span className="sc-label">Payments blocked</span>
+        <strong className="sc-val">{blocked}</strong>
+        <span className="sc-sub">violations caught</span>
+        <span className="sc-badge red" style={{ marginTop: "8px" }}>● Recorded on-chain</span>
+      </div>
     </div>
     <div className="two-col">
       <section className="card">
-        <div className="card-header"><span className="card-title">Recent payments</span><button className="btn-sm ghost" onClick={() => setView("proof-log")}>{"View all ->"}</button></div>
-        <div>{events.slice(0, 5).map((event) => <FeedRow event={event} key={event.id} />)}</div>
+        <div className="card-header">
+          <span className="card-title">Recent payments</span>
+          <button className="btn-sm ghost" onClick={() => setView("proof-log")}>{"View all ->"}</button>
+        </div>
+        <div>
+          {events.length === 0 ? (
+            <div className="empty-state">
+              <span className="es-icon">📊</span>
+              <div className="es-title">No payments yet</div>
+              <div className="es-desc">Run the AI agent console or check policy rules to verify and execute agent payments.</div>
+            </div>
+          ) : (
+            events.slice(0, 5).map((event) => <FeedRow event={event} key={event.id} />)
+          )}
+        </div>
       </section>
       <section className="card">
-        <div className="card-header"><span className="card-title">Active policy</span><span className="sc-badge green">Active</span></div>
+        <div className="card-header">
+          <span className="card-title">Active policy</span>
+          <span className={`sc-badge ${policy ? "green" : "red"}`}>{policy ? "Active" : "Inactive"}</span>
+        </div>
         <div className="card-body">
-          <div className="policy-title">DAO Treasury Agent</div>
-          <div className="policy-sub">Deployed Jul 2 - Expires Jul 15</div>
-          <div className="rule-row"><span className="rr-dot amber-dot" /><span className="rr-name">Max per payment</span><span className="rr-val">{"<= $50"}</span></div>
-          <div className="rule-row"><span className="rr-dot green-dot" /><span className="rr-name">Daily budget</span><span className="rr-val">{"<= $500"}</span></div>
-          <div className="rule-row"><span className="rr-dot purple-dot" /><span className="rr-name">Allowed vendors</span><span className="rr-val">3 addresses</span></div>
-          <div className="rule-row"><span className="rr-dot red-dot" /><span className="rr-name">Expires</span><span className="rr-val">Jul 15 2026</span></div>
-          <HashBox label="ON-CHAIN HASH" value={policyHash || "calculating"} />
-          <div className="button-row"><button className="btn-sm ghost fill" onClick={() => setView("policy-builder")}>Edit</button><button className="btn-sm danger fill">Revoke</button></div>
+          {policy ? (
+            <>
+              <div style={{ marginBottom: "14px" }}>
+                <div style={{ fontSize: "14px", fontWeight: "700", marginBottom: "2px" }}>{policy.name}</div>
+                <div style={{ fontSize: "12px", color: "var(--ink4)", fontFamily: "var(--mono)", marginBottom: "14px" }}>Deployed Jun 27 · Expires {policy.expiry}</div>
+              </div>
+              <div className="rule-row">
+                <span className="rr-dot amber-dot" />
+                <span className="rr-name">Max per payment</span>
+                <span className="rr-val">≤ ${policy.maxPerPayment} USDC</span>
+              </div>
+              <div className="rule-row">
+                <span className="rr-dot green-dot" />
+                <span className="rr-name">Daily budget</span>
+                <span className="rr-val">≤ ${policy.dailyLimit} USDC</span>
+              </div>
+              <div className="rule-row">
+                <span className="rr-dot purple-dot" />
+                <span className="rr-name">Allowed vendors</span>
+                <span className="rr-val">{policy.allowlist.length} addresses</span>
+              </div>
+              <div className="rule-row">
+                <span className="rr-dot red-dot" />
+                <span className="rr-name">Expires</span>
+                <span className="rr-val">{policy.expiry}</span>
+              </div>
+              <HashBox label="ON-CHAIN HASH" value={policyHash || "calculating"} />
+              <div className="button-row" style={{ display: "flex", gap: "8px", marginTop: "12px" }}>
+                <button className="btn-sm ghost fill" onClick={() => {
+                  setPolicy(policy);
+                  setInitialVault(vaultBalance);
+                  setView("policy-builder");
+                }}>Edit</button>
+                <button className="btn-sm primary fill" onClick={fundPolicy}>Fund</button>
+                <button className="btn-sm danger fill" onClick={revokePolicy}>Revoke</button>
+              </div>
+            </>
+          ) : (
+            <div className="empty-state" style={{ padding: "30px 14px" }}>
+              <span className="es-icon" style={{ fontSize: "24px" }}>🔒</span>
+              <div className="es-title" style={{ fontSize: "14px" }}>No active policy</div>
+              <div className="es-desc" style={{ fontSize: "12px" }}>Deploy a spending policy to get started.</div>
+              <button className="btn-sm primary" onClick={() => setView("policy-builder")} style={{ marginTop: "8px" }}>Create policy</button>
+            </div>
+          )}
         </div>
       </section>
     </div>
     <section className="card">
-      <div className="card-header"><span className="card-title">Quick actions</span><span className={`sc-badge ${api.realProverConfigured ? "green" : "amber"}`}>{api.realProverConfigured ? "RISC Zero live" : "Dev prover"}</span></div>
-      <div className="quick-grid">
-        <button className="quick-action" onClick={() => setView("agent")}><Bot size={22} /><b>Ask Agent</b><span>Propose a payment via AI</span></button>
-        <button className="quick-action" onClick={() => setView("policy-builder")}><FileText size={22} /><b>New Policy</b><span>Create spending rules</span></button>
-        <button className="quick-action" onClick={() => setView("proof-log")}><Activity size={22} /><b>Proof Log</b><span>View all payment proofs</span></button>
+      <div className="card-header">
+        <span className="card-title">Quick actions</span>
+        <span className={`sc-badge ${api.realProverConfigured ? "green" : "amber"}`}>
+          {api.realProverConfigured ? "RISC Zero live" : "Dev prover"}
+        </span>
       </div>
-    </section>
-    <section className="card">
-      <div className="card-header"><span className="card-title">Live integration</span><span className={`sc-badge ${health.ok && api.ok ? "green" : "red"}`}>{health.ok && api.ok ? "Online" : "Check API"}</span></div>
-      <div className="card-body integration-grid">
-        <IntegrationRow label="OpenAI intent API" value={api.openai ? "Configured" : "Fallback mode"} tone={api.openai ? "green" : "amber"} />
-        <IntegrationRow label="RISC Zero prover" value={api.realProverConfigured ? "Real receipt path" : "Dev evaluator"} tone={api.realProverConfigured ? "green" : "amber"} />
-        <IntegrationRow label="Gatekeeper" value={shortAddress(api.contractId || env.contractId)} tone={api.contractId ? "green" : "red"} href={contractLink(api.contractId || env.contractId)} />
-        <IntegrationRow label="Verifier" value={shortAddress(api.verifierContractId || env.verifierContractId)} tone={api.verifierContractId ? "green" : "red"} href={contractLink(api.verifierContractId || env.verifierContractId)} />
+      <div className="quick-grid">
+        <button className="quick-action" onClick={() => setView("agent")}>
+          <Bot size={22} />
+          <b>Ask Agent</b>
+          <span>Propose a payment via AI</span>
+        </button>
+        <button className="quick-action" onClick={() => {
+          setPolicy({
+            name: "",
+            maxPerPayment: "",
+            dailyLimit: "",
+            allowlist: [],
+            expiry: "",
+            salt: `salt-${Math.random().toString(36).substring(2, 10)}`
+          });
+          setInitialVault("");
+          setView("policy-builder");
+        }}>
+          <FileText size={22} />
+          <b>New Policy</b>
+          <span>Create spending rules</span>
+        </button>
+        <button className="quick-action" onClick={() => setView("proof-log")}>
+          <Activity size={22} />
+          <b>Proof Log</b>
+          <span>View all payment proofs</span>
+        </button>
       </div>
     </section>
   </>;
@@ -415,17 +885,206 @@ function FeedRow({ event }: { event: EventRow }) {
   return <button className="feed-row"><span className={`fr-badge ${event.status === "VERIFIED" ? "v" : event.status === "BLOCKED" ? "b" : "p"}`}>{event.status}</span><span className="fr-info"><span className="fr-main">{shortAddress(event.recipient)}</span><span className="fr-sub">{event.proof}</span></span><span className="fr-amt">${event.amount}</span><span className="fr-time">{event.time}</span><span className="fr-arrow">›</span></button>;
 }
 
-function PolicyBuilder({ policy, setPolicy, policyHash, notify }: { policy: PolicyDefinition; setPolicy: (p: PolicyDefinition) => void; policyHash: string; notify: (m: string, t?: "success" | "warn" | "error" | "info") => void }) {
+function PolicyBuilder({
+  policy,
+  setPolicy,
+  policyHash,
+  notify,
+  deployPolicy,
+  saveDraft,
+  initialVault,
+  setInitialVault
+}: {
+  policy: PolicyDefinition;
+  setPolicy: (p: PolicyDefinition) => void;
+  policyHash: string;
+  notify: (m: string, t?: "success" | "warn" | "error" | "info") => void;
+  deployPolicy: () => void;
+  saveDraft: () => void;
+  initialVault: string;
+  setInitialVault: (v: string) => void;
+}) {
+  const [recipientInput, setRecipientInput] = useState("");
+
   function patch(next: Partial<PolicyDefinition>) { setPolicy({ ...policy, ...next }); }
-  const allowlistText = policy.allowlist.join("\n");
-  return <div className="three-col"><section className="card"><div className="card-header"><span className="card-title">Create private agent policy</span></div><div className="card-body"><Field label="Policy name" value={policy.name} onChange={(v) => patch({ name: v })} /><div className="form-grid"><Field label="Max per payment" value={policy.maxPerPayment} onChange={(v) => patch({ maxPerPayment: v })} /><Field label="Daily budget" value={policy.dailyLimit} onChange={(v) => patch({ dailyLimit: v })} /></div><label className="form-row"><span className="form-label">Recipient allowlist</span><textarea className="form-input area" value={allowlistText} onChange={(e) => patch({ allowlist: e.target.value.split(/\s+/).filter(Boolean) })} /></label><Field label="Expiry date" type="date" value={policy.expiry} onChange={(v) => patch({ expiry: v })} /><button className="btn-sm primary" onClick={() => notify(env.contractId ? "Ready to build register_policy transaction." : "Set VITE_PAYGUARD_CONTRACT_ID before deploying on Stellar.", env.contractId ? "success" : "warn")}>Deploy policy hash</button></div></section><aside className="hash-preview"><div className="hp-eyebrow">Canonical policy hash</div><div className="hp-hash">{policyHash || "calculating"}</div><div className="hp-private-note"><strong>Private by default.</strong> Max amount, budget, allowlist and expiry stay off-chain. Stellar receives only the hash and proof-bound decisions.</div></aside></div>;
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      const val = recipientInput.trim();
+      if (!val) return;
+      if (!policy.allowlist.includes(val)) {
+        patch({ allowlist: [...policy.allowlist, val] });
+      }
+      setRecipientInput("");
+    }
+  };
+
+  const removeRecipient = (index: number) => {
+    const next = [...policy.allowlist];
+    next.splice(index, 1);
+    patch({ allowlist: next });
+  };
+
+  const hasSummary = policy.name || policy.maxPerPayment || policy.dailyLimit || policy.expiry || initialVault;
+
+  return (
+    <div className="three-col">
+      <section className="card">
+        <div className="card-header"><span className="card-title">Create a policy</span></div>
+        <div className="card-body">
+          <div className="form-row">
+            <span className="form-label">Policy name</span>
+            <input
+              className="form-input"
+              type="text"
+              placeholder="e.g. DAO Treasury Agent"
+              value={policy.name}
+              onChange={(e) => patch({ name: e.target.value })}
+            />
+          </div>
+
+          <div className="form-row">
+            <span className="form-label">Max payment amount (USDC)</span>
+            <input
+              className="form-input"
+              type="number"
+              placeholder="50"
+              value={policy.maxPerPayment}
+              onChange={(e) => patch({ maxPerPayment: e.target.value })}
+            />
+            <div className="form-hint" style={{ fontSize: "11px", color: "var(--ink4)", marginTop: "4px" }}>
+              Agent cannot make a single payment above this amount
+            </div>
+          </div>
+
+          <div className="form-row">
+            <span className="form-label">Daily spending budget (USDC)</span>
+            <input
+              className="form-input"
+              type="number"
+              placeholder="200"
+              value={policy.dailyLimit}
+              onChange={(e) => patch({ dailyLimit: e.target.value })}
+            />
+            <div className="form-hint" style={{ fontSize: "11px", color: "var(--ink4)", marginTop: "4px" }}>
+              Total spending resets every 24 hours
+            </div>
+          </div>
+
+          <div className="form-row">
+            <span className="form-label">Allowed recipients</span>
+            <div className="tag-input-wrap" onClick={() => document.getElementById("tag-in")?.focus()}>
+              {policy.allowlist.map((addr, i) => (
+                <span className="tag-chip" key={addr}>
+                  {shortAddress(addr)}
+                  <button onClick={() => removeRecipient(i)}>×</button>
+                </span>
+              ))}
+              <input
+                className="tag-in"
+                id="tag-in"
+                placeholder="Add Stellar address…"
+                value={recipientInput}
+                onChange={(e) => setRecipientInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+              />
+            </div>
+            <div className="form-hint" style={{ fontSize: "11px", color: "var(--ink4)", marginTop: "4px" }}>
+              Press Enter to add. Only these addresses can receive funds.
+            </div>
+          </div>
+
+          <div className="form-row">
+            <span className="form-label">Policy expiry</span>
+            <input
+              className="form-input"
+              type="date"
+              value={policy.expiry}
+              onChange={(e) => patch({ expiry: e.target.value })}
+            />
+          </div>
+
+          <div className="form-row">
+            <span className="form-label">Initial vault amount (USDC)</span>
+            <input
+              className="form-input"
+              type="number"
+              placeholder="1000"
+              value={initialVault}
+              onChange={(e) => setInitialVault(e.target.value)}
+            />
+          </div>
+
+          <div style={{ display: "flex", gap: "10px", marginTop: "14px" }}>
+            <button className="btn-sm ghost" onClick={saveDraft}>Save draft</button>
+            <button className="btn-sm primary" onClick={deployPolicy}>
+              <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" style={{ marginRight: "4px" }}>
+                <path d="M7 1L12 4V10L7 13L2 10V4L7 1Z" />
+              </svg>
+              Deploy to Stellar
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <aside className="hash-preview">
+        <div className="hp-eyebrow">Policy fingerprint</div>
+        <div className="hp-hash" style={{ color: "var(--amber)" }}>{policyHash || "calculating"}<br /><span style={{ opacity: 0.4 }}>(changes as you edit)</span></div>
+        <div className="hp-private-note">
+          <strong>Your rules stay private.</strong><br /><br />
+          Only this 32-byte fingerprint is registered on Stellar. Nobody can reverse it to read your actual rule values.
+        </div>
+        <div style={{ marginTop: "14px", padding: "10px 12px", background: "rgba(255, 255, 255, 0.04)", borderRadius: "8px", border: "1px solid rgba(255, 255, 255, 0.08)" }}>
+          <div style={{ fontSize: "10px", color: "rgba(255, 255, 255, 0.3)", fontFamily: "var(--mono)", marginBottom: "6px" }}>RULES SUMMARY</div>
+          <div style={{ fontSize: "11px", color: "rgba(255, 255, 255, 0.5)", lineHeight: "1.8" }}>
+            {hasSummary ? (
+              <div>
+                {policy.name && <>Name: {policy.name}<br /></>}
+                {policy.maxPerPayment && <>Max per tx: ${policy.maxPerPayment} USDC<br /></>}
+                {policy.dailyLimit && <>Daily limit: ${policy.dailyLimit} USDC<br /></>}
+                {policy.expiry && <>Expires: {policy.expiry}<br /></>}
+                {initialVault && <>Initial vault: ${initialVault} USDC</>}
+              </div>
+            ) : (
+              "Fill in the form to see your policy summary"
+            )}
+          </div>
+        </div>
+      </aside>
+    </div>
+  );
 }
 
 function Field({ label, value, onChange, type = "text" }: { label: string; value: string; onChange: (value: string) => void; type?: string }) {
   return <label className="form-row"><span className="form-label">{label}</span><input className="form-input" type={type} value={value} onChange={(e) => onChange(e.target.value)} /></label>;
 }
 
-function AgentConsole({ policy, policyHash, events, setEvents, notify, api }: { policy: PolicyDefinition; policyHash: string; events: EventRow[]; setEvents: (events: EventRow[]) => void; notify: (m: string, t?: "success" | "warn" | "error" | "info") => void; api: ApiStatus }) {
+function AgentConsole({
+  policy,
+  policyHash,
+  events,
+  setEvents,
+  notify,
+  api,
+  spentToday,
+  vaultBalance,
+  setSpentToday,
+  setVaultBalance,
+  wallet
+}: {
+  policy: PolicyDefinition | null;
+  policyHash: string;
+  events: EventRow[];
+  setEvents: (events: EventRow[]) => void;
+  notify: (m: string, t?: "success" | "warn" | "error" | "info") => void;
+  api: ApiStatus;
+  spentToday: string;
+  vaultBalance: string;
+  setSpentToday: React.Dispatch<React.SetStateAction<string>>;
+  setVaultBalance: React.Dispatch<React.SetStateAction<string>>;
+  wallet: { address: string; network: string } | null;
+}) {
   const [prompt, setPrompt] = useState("Pay Vendor A 30 USDC for API usage this month");
   const [intent, setIntent] = useState<PaymentIntent | null>(null);
   const [proof, setProof] = useState<any>(null);
@@ -433,6 +1092,10 @@ function AgentConsole({ policy, policyHash, events, setEvents, notify, api }: { 
   const [step, setStep] = useState(0);
 
   async function runAgent() {
+    if (!policy) {
+      notify("Please deploy an active policy first in the Policies page", "warn");
+      return;
+    }
     setBusy(true); setProof(null); setStep(1);
     try {
       const res = await fetch(`${env.apiUrl}/v1/agent/payment-intent`, {
@@ -451,13 +1114,13 @@ function AgentConsole({ policy, policyHash, events, setEvents, notify, api }: { 
   }
 
   async function generateProof() {
-    if (!intent) return;
+    if (!intent || !policy) return;
     setBusy(true); setProof(null); setStep(2);
     try {
       const job = await fetch(`${env.apiUrl}/v1/proofs`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ policy, intent, spentToday: "75", vaultBalance: "200" })
+        body: JSON.stringify({ policy, intent, spentToday, vaultBalance })
       }).then((r) => r.json());
       setStep(3);
       let finalJob = job;
@@ -467,19 +1130,100 @@ function AgentConsole({ policy, policyHash, events, setEvents, notify, api }: { 
         if (finalJob.status === "complete" || finalJob.status === "failed") break;
       }
       if (finalJob.status !== "complete") throw new Error(finalJob.error ?? "Proof job failed");
-      setProof(finalJob.result);
-      const status = finalJob.result.approved ? "VERIFIED" : "BLOCKED";
+
+      const result = finalJob.result;
+      setProof(result);
+      const status = result.approved ? "VERIFIED" : "BLOCKED";
+
+      let txHash = "";
+      if (wallet && env.contractId) {
+        notify("Submitting decision proof to Soroban contract...", "info");
+        try {
+          const policyId = await computePolicyId(policyHash, policy.salt);
+          const network_hash = await getNetworkHash();
+          const tokenAddress = env.tokenContractId || "CDLZFC3SYJYD5765ZP65CH3N4ZPP7QCQPVEAW57KYN22A2KU2C64VUT7";
+
+          let nonce = 0n;
+          try {
+            const contractPolicy = await getPolicyState(policyId);
+            nonce = BigInt(contractPolicy.nonce);
+          } catch {
+            // fallback
+          }
+
+          const amountBig = parseUsdc(intent.amount);
+          const spentBeforeBig = parseUsdc(spentToday);
+          const vaultBeforeBig = parseUsdc(vaultBalance);
+
+          const approved = result.approved;
+          const violation = result.violation;
+
+          const spentAfterBig = approved ? spentBeforeBig + amountBig : spentBeforeBig;
+          const vaultAfterBig = approved ? vaultBeforeBig - amountBig : vaultBeforeBig;
+
+          const dayIndex = BigInt(Math.floor(Date.now() / 1000 / 86400));
+          const proofTimestamp = BigInt(Math.floor(Date.now() / 1000));
+
+          const txRes = await executeDecision({
+            source: wallet.address,
+            contractId: env.contractId,
+            policyId,
+            sealHex: result.sealHex,
+            journal: {
+              network_hash,
+              gatekeeper: env.contractId,
+              policy_id: policyId,
+              policy_hash: policyHash,
+              token: tokenAddress,
+              executor: wallet.address,
+              recipient: intent.recipient,
+              amount: amountBig,
+              day_index: dayIndex,
+              spent_before: spentBeforeBig,
+              spent_after: spentAfterBig,
+              vault_before: vaultBeforeBig,
+              vault_after: vaultAfterBig,
+              nonce: nonce,
+              proof_timestamp: proofTimestamp,
+              approved,
+              violation,
+              intent_digest: result.intentDigest
+            }
+          });
+          txHash = txRes.hash;
+          notify(approved ? "Payment executed on Stellar testnet!" : "Verified denial recorded on Stellar testnet!", "success");
+
+          // Reload from contract
+          const updatedState = await getPolicyState(policyId);
+          if (updatedState) {
+            setVaultBalance(formatUsdc(BigInt(updatedState.vault_balance)));
+            setSpentToday(formatUsdc(BigInt(updatedState.spent)));
+          }
+        } catch (error) {
+          console.error(error);
+          notify("Failed to execute on Stellar: " + (error instanceof Error ? error.message : String(error)), "error");
+        }
+      } else {
+        if (status === "VERIFIED") {
+          setVaultBalance((prev) => {
+            const next = Number(prev) - Number(intent.amount);
+            return next >= 0 ? String(next) : "0";
+          });
+          setSpentToday((prev) => String(Number(prev) + Number(intent.amount)));
+        }
+      }
+
       const row: EventRow = {
         id: crypto.randomUUID(),
         time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
         recipient: intent.recipient,
         amount: intent.amount,
         status,
-        violation: violationName(finalJob.result.violation),
-        proof: `0x${String(finalJob.result.journalDigest).slice(0, 4)}...${String(finalJob.result.journalDigest).slice(-4)}`
+        violation: violationName(result.violation),
+        proof: `0x${String(result.journalDigest).slice(0, 4)}...${String(result.journalDigest).slice(-4)}`,
+        txHash: txHash || undefined
       };
       setEvents([row, ...events]);
-      notify(status === "VERIFIED" ? "Proof accepted: payment policy approved." : "Verified denial recorded: no funds move.", status === "VERIFIED" ? "success" : "error");
     } catch (error) {
       notify(error instanceof Error ? error.message : "Proof generation failed", "error");
     } finally {
@@ -487,9 +1231,9 @@ function AgentConsole({ policy, policyHash, events, setEvents, notify, api }: { 
     }
   }
 
-  const localDecision = useMemo(() => intent ? evaluatePolicy({ policy, intent, spentToday: "75", vaultBalance: "200" }) : null, [intent, policy]);
+  const localDecision = useMemo(() => intent && policy ? evaluatePolicy({ policy, intent, spentToday, vaultBalance }) : null, [intent, policy, spentToday, vaultBalance]);
 
-  return <div className="two-col"><section className="card"><div className="card-header"><span className="card-title">Agent payment console</span><span className="card-sub">{api.openai ? "OpenAI + RISC Zero policy check" : "Fallback intent + policy check"}</span></div><div className="card-body"><textarea className="prompt-box" value={prompt} onChange={(e) => setPrompt(e.target.value)} /><div className="prompt-examples">{["Pay Vendor A 30 USDC for API usage", "Pay Vendor B 25 USDC for design work", "Pay unknown vendor 80 USDC"].map((x) => <button className="prompt-chip" onClick={() => setPrompt(x)} key={x}>{x}</button>)}</div><div className="button-row"><button className="btn-sm primary" disabled={busy} onClick={runAgent}><Bot size={14} /> Run agent</button><button className="btn-sm ghost" disabled={!intent || busy} onClick={generateProof}><Shield size={14} /> Generate proof</button></div>{intent && <IntentCard intent={intent} />}{step > 0 && <ProofSteps step={step} />}{proof && <ResultCard proof={proof} />}</div></section><section className="card"><div className="card-header"><span className="card-title">Active enforcement context</span><span className={`sc-badge ${api.realProverConfigured ? "green" : "amber"}`}>{api.realProverConfigured ? "RISC Zero" : "Dev"}</span></div><div className="card-body"><MiniRules /><HashBox label="Policy hash" value={policyHash} /><HashBox label="RISC ZERO IMAGE ID" value={env.risc0ImageId || "waiting for env"} /><div className="settings-row"><span><b>Recipient validation</b><small>{intent ? isLikelyStellarAddress(intent.recipient) ? "Stellar G address" : "Invalid" : "waiting for intent"}</small></span></div><div className="settings-row"><span><b>Contract mode</b><small>{api.contractId ? "testnet gatekeeper configured" : "configure contract id"}</small></span></div><div className="settings-row"><span><b>Verifier mode</b><small>{api.verifierContractId ? shortAddress(api.verifierContractId) : "not configured"}</small></span></div><small className="muted">With PAYGUARD_REAL_PROVER_CMD set, proof jobs call the local RISC Zero host, verify the receipt, then return the journal digest and seal for the Stellar verifier boundary.</small></div></section></div>;
+  return <div className="two-col"><section className="card"><div className="card-header"><span className="card-title">Agent payment console</span><span className="card-sub">{api.openai ? "OpenAI + RISC Zero policy check" : "Fallback intent + policy check"}</span></div><div className="card-body"><textarea className="prompt-box" value={prompt} onChange={(e) => setPrompt(e.target.value)} /><div className="prompt-examples">{["Pay Vendor A 30 USDC for API usage", "Pay Vendor B 25 USDC for design work", "Pay unknown vendor 80 USDC"].map((x) => <button className="prompt-chip" onClick={() => setPrompt(x)} key={x}>{x}</button>)}</div><div className="button-row"><button className="btn-sm primary" disabled={busy || !policy} onClick={runAgent}><Bot size={14} /> Run agent</button><button className="btn-sm ghost" disabled={!intent || busy || !policy} onClick={generateProof}><Shield size={14} /> Generate proof</button></div>{!policy && <div style={{ background: "var(--amber-bg)", color: "var(--amber)", padding: "10px 12px", borderRadius: "8px", border: "1px solid rgba(245, 158, 11, 0.15)", fontSize: "12px", display: "flex", gap: "6px", alignItems: "center", marginTop: "12px" }}><Shield size={14} /> Please deploy an active policy first to enable agent payments.</div>}{intent && <IntentCard intent={intent} />}{step > 0 && <ProofSteps step={step} />}{proof && <ResultCard proof={proof} />}</div></section><section className="card"><div className="card-header"><span className="card-title">Active enforcement context</span><span className={`sc-badge ${api.realProverConfigured ? "green" : "amber"}`}>{api.realProverConfigured ? "RISC Zero" : "Dev"}</span></div><div className="card-body"><MiniRules policy={policy} policyHash={policyHash} /><HashBox label="Policy hash" value={policyHash || "no active policy"} /><HashBox label="RISC ZERO IMAGE ID" value={env.risc0ImageId || "waiting for env"} /><div className="settings-row"><span><b>Recipient validation</b><small>{intent ? isLikelyStellarAddress(intent.recipient) ? "Stellar G address" : "Invalid" : "waiting for intent"}</small></span></div><div className="settings-row"><span><b>Contract mode</b><small>{api.contractId ? "testnet gatekeeper configured" : "configure contract id"}</small></span></div><div className="settings-row"><span><b>Verifier mode</b><small>{api.verifierContractId ? shortAddress(api.verifierContractId) : "not configured"}</small></span></div><small className="muted">With PAYGUARD_REAL_PROVER_CMD set, proof jobs call the local RISC Zero host, verify the receipt, then return the journal digest and seal for the Stellar verifier boundary.</small></div></section></div>;
 }
 
 function IntentCard({ intent }: { intent: PaymentIntent }) {
@@ -509,17 +1253,227 @@ function violationName(code: number) {
   return ({ [ViolationCode.None]: "-", [ViolationCode.MaxPayment]: "max_per_tx", [ViolationCode.DailyLimit]: "daily_limit", [ViolationCode.Allowlist]: "allowlist", [ViolationCode.Expired]: "expired", [ViolationCode.InsufficientVault]: "insufficient_vault" } as Record<number, string>)[code] ?? "unknown";
 }
 
-function Policies({ policy, policyHash }: { policy: PolicyDefinition; policyHash: string }) {
-  return <section className="card"><div className="card-header"><span className="card-title">My Policies</span></div><div className="card-body"><div className="log-table-wrap"><table className="log-table"><tbody><tr><td>{policy.name}</td><td className="td-mono">{policyHash}</td><td><span className="fr-badge p">LOCAL</span></td></tr></tbody></table></div></div></section>;
+function Policies({
+  policy,
+  policyHash,
+  setView,
+  setPolicy,
+  setInitialVault,
+  revokePolicy,
+  vaultBalance
+}: {
+  policy: PolicyDefinition | null;
+  policyHash: string;
+  setView: (view: View) => void;
+  setPolicy: (p: PolicyDefinition) => void;
+  setInitialVault: (v: string) => void;
+  revokePolicy: () => void;
+  vaultBalance: string;
+}) {
+  const isActive = Number(vaultBalance) > 0;
+
+  const handleNewPolicy = () => {
+    setPolicy({
+      name: "",
+      maxPerPayment: "",
+      dailyLimit: "",
+      allowlist: [],
+      expiry: "",
+      salt: `salt-${Math.random().toString(36).substring(2, 10)}`
+    });
+    setInitialVault("");
+    setView("policy-builder");
+  };
+
+  const handleEdit = () => {
+    if (policy) {
+      setPolicy(policy);
+      setInitialVault(vaultBalance);
+      setView("policy-builder");
+    }
+  };
+
+  return (
+    <div id="page-policies">
+      <div style={{ marginBottom: "16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div>
+          <div style={{ fontSize: "14px", fontWeight: "600", color: "var(--ink)" }}>My policies</div>
+          <div style={{ fontSize: "12px", color: "var(--ink4)", marginTop: "2px" }}>
+            {policy ? (isActive ? "1 active policy on Stellar testnet" : "0 active policies on Stellar testnet") : "0 active policies on Stellar testnet"}
+          </div>
+        </div>
+        <button className="btn-sm primary" onClick={handleNewPolicy}>+ New policy</button>
+      </div>
+
+      {policy ? (
+        <div className="card">
+          <div className="feed-row" style={{ cursor: "default", padding: "16px 18px", alignItems: "flex-start", gap: "14px" }}>
+            <div style={{ width: "40px", height: "40px", background: "var(--amber-bg)", borderRadius: "10px", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontSize: "18px" }}>
+              🔒
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: "14px", fontWeight: "600", color: "var(--ink)", marginBottom: "3px" }}>{policy.name || "Unnamed Policy"}</div>
+              <div style={{ fontSize: "12px", color: "var(--ink4)", fontFamily: "var(--mono)", marginBottom: "8px" }}>
+                Deployed Jun 27 · Expires {policy.expiry || "No expiry"}
+              </div>
+              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                <span className={`sc-badge ${isActive ? "green" : "red"}`}>● {isActive ? "Active" : "Inactive"}</span>
+                {policy.maxPerPayment && (
+                  <span style={{ fontSize: "11px", background: "var(--c2)", color: "var(--ink3)", padding: "3px 8px", borderRadius: "6px", border: "1px solid var(--c3)", fontFamily: "var(--mono)" }}>
+                    ≤${policy.maxPerPayment}/tx
+                  </span>
+                )}
+                {policy.dailyLimit && (
+                  <span style={{ fontSize: "11px", background: "var(--c2)", color: "var(--ink3)", padding: "3px 8px", borderRadius: "6px", border: "1px solid var(--c3)", fontFamily: "var(--mono)" }}>
+                    ≤${policy.dailyLimit}/day
+                  </span>
+                )}
+                <span style={{ fontSize: "11px", background: "var(--c2)", color: "var(--ink3)", padding: "3px 8px", borderRadius: "6px", border: "1px solid var(--c3)", fontFamily: "var(--mono)" }}>
+                  {policy.allowlist.length} {policy.allowlist.length === 1 ? "vendor" : "vendors"}
+                </span>
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: "8px" }}>
+              <button className="btn-sm ghost" onClick={handleEdit} style={{ fontSize: "12px" }}>Edit</button>
+              <button className="btn-sm danger" onClick={revokePolicy} style={{ fontSize: "12px" }}>Revoke</button>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="card" style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "60px 24px", background: "var(--white)", border: "1px solid var(--border)", borderRadius: "var(--r-lg)", textAlign: "center" }}>
+          <span style={{ fontSize: "40px", marginBottom: "12px" }}>📋</span>
+          <div style={{ fontSize: "16px", fontWeight: "700", color: "var(--ink)", marginBottom: "4px" }}>No policies found</div>
+          <div style={{ fontSize: "13px", color: "var(--ink3)", maxWidth: "340px", lineHeight: "1.6", marginBottom: "20px" }}>
+            Create and deploy a private spending policy to delegate payments to your AI agents safely.
+          </div>
+          <button className="btn-sm primary" onClick={handleNewPolicy}>
+            Create policy
+          </button>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function ProofLog({ events, notify }: { events: EventRow[]; notify: (m: string) => void }) {
-  const csv = ["Time,Recipient,Amount,Status,Violation,Proof,TxHash", ...events.map((e) => [e.time, e.recipient, e.amount, e.status, e.violation, e.proof, e.txHash ?? ""].join(","))].join("\n");
+  const [filter, setFilter] = useState<"all" | "verified" | "blocked">("all");
+
+  const allCount = events.length;
+  const verifiedCount = events.filter((e) => e.status === "VERIFIED").length;
+  const blockedCount = events.filter((e) => e.status === "BLOCKED").length;
+
+  const filteredEvents = events.filter((e) => {
+    if (filter === "verified") return e.status === "VERIFIED";
+    if (filter === "blocked") return e.status === "BLOCKED";
+    return true;
+  });
+
+  const csv = [
+    "Time,Recipient,Amount,Status,Violation,Proof,TxHash",
+    ...events.map((e) => [e.time, e.recipient, e.amount, e.status, e.violation, e.proof, e.txHash ?? ""].join(","))
+  ].join("\n");
+
   function download() {
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
-    const a = document.createElement("a"); a.href = url; a.download = "payguard-proof-log.csv"; a.click(); URL.revokeObjectURL(url); notify("Proof log exported as CSV");
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "payguard-proof-log.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+    notify("Proof log exported as CSV");
   }
-  return <section className="card"><div className="card-header"><span className="card-title">Proof audit log</span><button className="btn-sm ghost" onClick={download}><Download size={14} /> Export CSV</button></div><div className="log-table-wrap"><table className="log-table"><thead><tr><th>Time</th><th>Recipient</th><th>Amount</th><th>Status</th><th>Violation</th><th>Proof digest</th><th>Tx</th></tr></thead><tbody>{events.map((e) => <tr key={e.id}><td className="td-mono">{e.time}</td><td className="td-mono">{shortAddress(e.recipient)}</td><td>${e.amount} USDC</td><td><span className={`fr-badge ${e.status === "VERIFIED" ? "v" : "b"}`}>{e.status}</span></td><td>{e.violation}</td><td className="td-mono">{e.proof}</td><td>{e.txHash ? <a className="td-link" href={stellarExpertTx(e.txHash)}>View</a> : "-"}</td></tr>)}</tbody></table></div></section>;
+
+  return (
+    <div id="page-proof-log">
+      <div className="log-filters">
+        <button
+          className={`filter-btn ${filter === "all" ? "active" : ""}`}
+          onClick={() => setFilter("all")}
+        >
+          All ({allCount})
+        </button>
+        <button
+          className={`filter-btn ${filter === "verified" ? "active" : ""}`}
+          onClick={() => setFilter("verified")}
+        >
+          Verified ({verifiedCount})
+        </button>
+        <button
+          className={`filter-btn ${filter === "blocked" ? "active" : ""}`}
+          onClick={() => setFilter("blocked")}
+        >
+          Blocked ({blockedCount})
+        </button>
+        <button className="btn-sm ghost" onClick={download} style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "6px" }}>
+          <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.6">
+            <path d="M7 1v9M4 7l3 3 3-3M1 11v1a1 1 0 001 1h10a1 1 0 001-1v-1" />
+          </svg>
+          Export CSV
+        </button>
+      </div>
+
+      <div className="card" style={{ overflow: "auto" }}>
+        <table className="log-table">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Recipient</th>
+              <th>Amount</th>
+              <th>Status</th>
+              <th>Violation</th>
+              <th>Proof digest</th>
+              <th>Tx hash</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredEvents.length === 0 ? (
+              <tr>
+                <td colSpan={7} style={{ textAlign: "center", padding: "40px 14px", color: "var(--ink4)" }}>
+                  No logs matching the filter.
+                </td>
+              </tr>
+            ) : (
+              filteredEvents.map((e) => (
+                <tr key={e.id}>
+                  <td className="td-mono">{e.time}</td>
+                  <td className="td-mono">{shortAddress(e.recipient)}</td>
+                  <td style={{ fontWeight: "700", color: e.status === "BLOCKED" ? "var(--red)" : "var(--ink)" }}>
+                    ${e.amount} USDC
+                  </td>
+                  <td>
+                    <span className={`sc-badge ${e.status === "VERIFIED" ? "green" : "red"}`} style={{ padding: "3px 8px", borderRadius: "6px", fontSize: "11px", fontWeight: "600" }}>
+                      {e.status}
+                    </span>
+                  </td>
+                  <td>
+                    {e.status === "BLOCKED" ? (
+                      <span style={{ fontSize: "11px", background: "var(--red-bg)", color: "var(--red)", padding: "3px 8px", borderRadius: "6px", border: "1px solid rgba(239, 68, 68, 0.15)", fontFamily: "var(--mono)" }}>
+                        {e.violation}
+                      </span>
+                    ) : (
+                      <span style={{ fontSize: "11px", background: "var(--c2)", color: "var(--ink4)", padding: "3px 8px", borderRadius: "6px", border: "1px solid var(--c3)", fontFamily: "var(--mono)" }}>
+                        -
+                      </span>
+                    )}
+                  </td>
+                  <td className="td-mono">{e.proof}</td>
+                  <td>
+                    {e.txHash ? (
+                      <a className="td-link" href={stellarExpertTx(e.txHash)} target="_blank" rel="noreferrer" style={{ fontSize: "12px", display: "inline-flex", alignItems: "center", gap: "2px" }}>
+                        View ↗
+                      </a>
+                    ) : (
+                      <span style={{ color: "var(--ink4)" }}>-</span>
+                    )}
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
 }
 
 function Settings({ wallet, disconnect, health, api }: { wallet: { address: string; network: string } | null; disconnect: () => void; health: { ok: boolean; status: string; ledger: number | null }; api: ApiStatus }) {
