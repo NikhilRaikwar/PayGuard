@@ -284,7 +284,7 @@ export function App() {
     if (!fundAmountInput) return;
     try {
       const amountBig = parseUsdc(fundAmountInput);
-      if (env.contractId && activePolicy && activePolicyHash) {
+      if (wallet && env.contractId && activePolicy && activePolicyHash) {
         notify("Funding policy on-chain...", "info");
         const policyId = await computePolicyId(activePolicyHash, activePolicy.salt);
         const policyIdBytes = scBytes32(policyId);
