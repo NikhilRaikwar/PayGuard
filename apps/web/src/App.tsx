@@ -349,7 +349,7 @@ export function App() {
           <div className="topbar-title">{pageTitle(view)}</div>
           <div className="topbar-right">
             <span className={`sc-badge ${health.ok ? "green" : "red"}`}>RPC {health.status}</span>
-            <button className="btn-sm ghost" onClick={() => { rpcHealth().then(setHealth); apiStatus().then(setApi); }}><RefreshCcw size={14} /> Refresh</button>
+            <button className="btn-sm ghost" onClick={() => { rpcHealth().then(setHealth); apiStatus().then(setApi); refreshOnChainState(); }}><RefreshCcw size={14} /> Refresh</button>
             <button className="btn-sm primary" onClick={() => setView("agent")}><Bot size={14} /> Ask Agent</button>
           </div>
         </header>
