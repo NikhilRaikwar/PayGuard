@@ -3,7 +3,7 @@ FROM ubuntu:24.04
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PATH="/root/.risc0/bin:/root/.cargo/bin:${PATH}"
 ENV PORT=10000
-ENV PAYGUARD_REAL_PROVER_CMD=scripts/prove-risc0-groth16.sh
+ENV PAYGUARD_REAL_PROVER_CMD=/app/scripts/prove-risc0-groth16.sh
 ENV PAYGUARD_VERIFIER_MODE=risc0-groth16-onchain
 ENV PAYGUARD_SKIP_RZUP_INSTALL=true
 
