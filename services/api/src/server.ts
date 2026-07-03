@@ -1,7 +1,10 @@
-import "dotenv/config";
 import cors from "cors";
+import dotenv from "dotenv";
 import express from "express";
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import {
   evaluatePolicy,
@@ -10,6 +13,8 @@ import {
   type PaymentIntent,
   type PolicyDefinition
 } from "@payguard/protocol";
+
+loadEnv();
 
 const app = express();
 const port = Number(process.env.PORT ?? 8787);
@@ -322,3 +327,16 @@ function assertSameDecision(expected: Awaited<ReturnType<typeof evaluatePolicy>>
 app.listen(port, () => {
   console.log(`PayGuard API listening on http://localhost:${port}`);
 });
+
+function loadEnv() {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    process.env.PAYGUARD_ENV_FILE,
+    join(process.cwd(), ".env"),
+    resolve(here, "../../../.env"),
+    resolve(here, "../../.env"),
+    resolve(here, "../.env")
+  ].filter(Boolean) as string[];
+  const envPath = candidates.find((candidate) => existsSync(candidate));
+  dotenv.config(envPath ? { path: envPath } : undefined);
+}
