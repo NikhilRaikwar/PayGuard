@@ -17,6 +17,7 @@
     "dev:web": "npm run dev --workspace @payguard/web",
     "dev:api": "npm run dev --workspace @payguard/api",
     "build": "npm run build --workspace @payguard/protocol && npm run build --workspace @payguard/api && npm run build --workspace @payguard/web",
+    "build:web": "npm run build --workspace @payguard/protocol && npm run build --workspace @payguard/web",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "contract:build": "stellar contract build --package payguard-gatekeeper",
     "test": "npm run typecheck && cargo test --workspace"
@@ -25,4 +26,3 @@
     "typescript": "^5.5.4"
   }
 }
-

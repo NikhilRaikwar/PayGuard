@@ -1,18 +1,19 @@
 {
   "network": "testnet",
   "rpcUrl": "https://soroban-testnet.stellar.org",
-  "payguardGatekeeper": "CCWI7RD45NERQ4XGUEFEBQ3IFAFASKWWERC6T2BX65WP7HKIVX6DV47G",
+  "payguardGatekeeper": "CDKNJSCK3DUCBJBTEFIYCGNZINAEKFBR24WNUVHCLCPUZJEBHDGLQCUK",
   "tokenContract": "",
-  "risc0Verifier": "CBBLSXR6SI2LGQ47LGZXWTH3FCFGRH2MKIWASYCNJBK7EQP4RJRJ56ZG",
-  "risc0ImageId": "04600792508247891dd720185555a22d28654184c312d8197b4ae8157fbe40cd",
+  "risc0Verifier": "CAHYIV4H2AWIXW5OQZO5EK4VOKLROLNGMB3AGJBR46XC63JKB3VM5CO5",
+  "risc0ImageId": "b0c26f9bf9a887389b8004d1f105529641b10140ad42ed0cbfb6fcb7ee51e461",
+  "verifierMode": "risc0-groth16-onchain",
+  "risc0SealSelector": "73c457ba",
   "networkHash": "cee0302d59844d32bdca915c8203dd44b33fbb7edc19051ea37abedf28ecd472",
-  "deployer": "GDS3AE253EX3ZDLSCBIGH3JCI2XGBVTI23ZP2INUOY562YJIAJM6FRQT",
+  "deployer": "payguard-deployer",
   "transactions": {
-    "verifierUpload": "1c6d0b7380acc41618468e53b5bbe8bc39ac69cc98193d56524e23f5a3aeebae",
-    "verifierDeploy": "722006ed5d16bc850c08d9d2fc8e12737a939124cd602b7ae394f5d212e23ff2",
-    "gatekeeperUpload": "99b26447686b25b386de47310e15b00183aa0e64bbdbd1f7d2f2db158928a372",
-    "gatekeeperDeployPlaceholder": "79fee730f4ab040f3ea9aad15d155fa4f490bb4ceec7085c2672fb66cd4b44e0",
-    "gatekeeperDeploy": "3e1c50cb895e3e4fa3174cd070096ebfe84c98d6bb980fcc238c7565019b75ac"
+    "verifierUpload": "035c75aaa4703b2f0fbcf6abefbe8df1eabbf5e22c54ab3e37df375e09ee3fb6",
+    "verifierDeploy": "2dbb911ec30bc4d7e6a611ea91b4e5d325af46a6558f6efda2910a356df3e57d",
+    "gatekeeperUpload": "1e393469be3925efa200e707258fa724bbc6955a8ec2188936ea069e360dbcd2",
+    "gatekeeperDeploy": "4d01e0f970feddea871e0e296f481e42b0f732679c71ef4888aab2aa60bfe32c"
   },
-  "notes": "Gatekeeper redeployed with the RISC Zero image ID produced by zk/risc0/host in WSL."
+  "notes": "Real RISC Zero Groth16 verifier and PayGuard gatekeeper deployed for Stellar testnet real-ZK path."
 }

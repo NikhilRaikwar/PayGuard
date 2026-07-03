@@ -6,7 +6,8 @@ PayGuard Agent satisfies the Real-World ZK requirement by making ZK the authoriz
 
 - The private policy is never stored on-chain.
 - Stellar stores the policy hash and proof-backed state.
-- `execute_decision` calls the configured verifier before it can update nonce, spend, vault balance, or transfer tokens.
+- `execute_decision` calls the RISC Zero Groth16 verifier before it can update nonce, spend, vault balance, or transfer tokens.
+- The deployed gatekeeper rejects the wrong image ID, journal digest, proof bytes, policy, nonce, or executor context.
 
 ## Demo Flow
 
@@ -20,12 +21,16 @@ PayGuard Agent satisfies the Real-World ZK requirement by making ZK the authoriz
 
 ## Real-Proof Work
 
-The API exposes the exact proof job boundary and can run the real prover:
+The API exposes the exact proof job boundary and can run the real prover. The live testnet path is:
 
-- Set `PAYGUARD_REAL_PROVER_CMD=scripts/prove-risc0.sh`.
-- The RISC Zero host proves the zkVM policy method and verifies the receipt locally.
-- Deploy `payguard_attestation_verifier` with the API/attester wallet.
-- Deploy `payguard_gatekeeper` with the verifier address and RISC Zero image ID.
-- Submit `execute_decision(policy_id, executor, seal, journal)` on testnet.
+- RISC Zero guest evaluates private policy rules.
+- Host prover produces a Groth16 receipt and locally verifies it.
+- The API returns the verifier-compatible seal, image ID, and journal digest.
+- The dashboard submits `execute_decision(policy_id, executor, seal, journal)` through the connected wallet.
+- The gatekeeper calls the deployed Groth16 verifier contract before any state transition.
 
-This follows the Stellar-compatible attestation pattern until native BN254 verification is available on the target network. The verifier contract boundary is isolated so a direct Groth16 verifier can replace the attestation verifier later.
+Live testnet contracts:
+
+- Gatekeeper: `CDKNJSCK3DUCBJBTEFIYCGNZINAEKFBR24WNUVHCLCPUZJEBHDGLQCUK`
+- RISC Zero Groth16 verifier: `CAHYIV4H2AWIXW5OQZO5EK4VOKLROLNGMB3AGJBR46XC63JKB3VM5CO5`
+- Image ID: `b0c26f9bf9a887389b8004d1f105529641b10140ad42ed0cbfb6fcb7ee51e461`
