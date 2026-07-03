@@ -1,4 +1,14 @@
+---
+title: PayGuard API
+emoji: 🛡️
+colorFrom: blue
+colorTo: green
+sdk: docker
+app_port: 10000
+---
+
 # PayGuard Agent
+
 
 [![Stellar Testnet](https://img.shields.io/badge/Stellar-Testnet-1f2937)](https://stellar.expert/explorer/testnet)
 [![RISC Zero](https://img.shields.io/badge/ZK-RISC%20Zero%20Groth16-7c3aed)](https://dev.risczero.com/)
