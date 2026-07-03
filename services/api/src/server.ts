@@ -3,7 +3,7 @@ import dotenv from "dotenv";
 import express from "express";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import {
@@ -14,6 +14,9 @@ import {
   type PaymentIntent,
   type PolicyDefinition
 } from "@payguard/protocol";
+
+const moduleDir = dirname(fileURLToPath(import.meta.url));
+const rootDir = resolve(moduleDir, "../../..");
 
 loadEnv();
 
@@ -302,11 +305,13 @@ async function runProofJob(
 
 async function runExternalProver(command: string, input: unknown): Promise<ProverOutput> {
   const timeoutMs = Number(process.env.PAYGUARD_PROVER_TIMEOUT_MS ?? 180_000);
+  const resolvedCommand = resolveProverCommand(command);
   return new Promise((resolve, reject) => {
-    const child = spawn(command, {
+    const child = spawn(resolvedCommand, {
       shell: true,
+      cwd: rootDir,
       stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env }
+      env: { ...process.env, PAYGUARD_REPO_ROOT: rootDir }
     });
     const timer = setTimeout(() => {
       child.kill("SIGTERM");
@@ -325,7 +330,7 @@ async function runExternalProver(command: string, input: unknown): Promise<Prove
     child.on("close", (code) => {
       clearTimeout(timer);
       if (code !== 0) {
-        reject(new Error(`RISC Zero prover exited ${code}: ${stderr || stdout}`));
+        reject(new Error(`RISC Zero prover exited ${code} from ${rootDir} using "${resolvedCommand}": ${stderr || stdout}`));
         return;
       }
       try {
@@ -339,6 +344,13 @@ async function runExternalProver(command: string, input: unknown): Promise<Prove
     child.stdin.on("error", () => {});
     child.stdin.end(JSON.stringify(input));
   });
+}
+
+function resolveProverCommand(command: string): string {
+  const trimmed = command.trim();
+  if (!trimmed) return trimmed;
+  if (isAbsolute(trimmed) || trimmed.includes(" ")) return trimmed;
+  return resolve(rootDir, trimmed);
 }
 
 function assertSameDecision(expected: Awaited<ReturnType<typeof evaluatePolicy>>, actual: ProverOutput) {
@@ -364,13 +376,12 @@ app.listen(port, () => {
 });
 
 function loadEnv() {
-  const here = dirname(fileURLToPath(import.meta.url));
   const candidates = [
     process.env.PAYGUARD_ENV_FILE,
     join(process.cwd(), ".env"),
-    resolve(here, "../../../.env"),
-    resolve(here, "../../.env"),
-    resolve(here, "../.env")
+    join(rootDir, ".env"),
+    resolve(moduleDir, "../../.env"),
+    resolve(moduleDir, "../.env")
   ].filter(Boolean) as string[];
   const envPath = candidates.find((candidate) => existsSync(candidate));
   dotenv.config(envPath ? { path: envPath } : undefined);
