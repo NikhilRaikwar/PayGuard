@@ -85,73 +85,24 @@ The gatekeeper calls the RISC Zero Groth16 verifier contract. Only after success
 
 ## ⛓️ Stellar Testnet Deployment
 
-**PayGuard Gatekeeper**
-
-```text
-CDKNJSCK3DUCBJBTEFIYCGNZINAEKFBR24WNUVHCLCPUZJEBHDGLQCUK
-```
-
-View:
-
-```text
-https://stellar.expert/explorer/testnet/contract/CDKNJSCK3DUCBJBTEFIYCGNZINAEKFBR24WNUVHCLCPUZJEBHDGLQCUK
-```
-
-**RISC Zero Groth16 Verifier**
-
-```text
-CAHYIV4H2AWIXW5OQZO5EK4VOKLROLNGMB3AGJBR46XC63JKB3VM5CO5
-```
-
-View:
-
-```text
-https://stellar.expert/explorer/testnet/contract/CAHYIV4H2AWIXW5OQZO5EK4VOKLROLNGMB3AGJBR46XC63JKB3VM5CO5
-```
-
-**Gatekeeper deploy transaction**
-
-```text
-4d01e0f970feddea871e0e296f481e42b0f732679c71ef4888aab2aa60bfe32c
-```
-
-**Verifier deploy transaction**
-
-```text
-2dbb911ec30bc4d7e6a611ea91b4e5d325af46a6558f6efda2910a356df3e57d
-```
-
-**RISC Zero image ID**
-
-```text
-b0c26f9bf9a887389b8004d1f105529641b10140ad42ed0cbfb6fcb7ee51e461
-```
-
-**Groth16 selector**
-
-```text
-73c457ba
-```
+| Item | Value | Link |
+| --- | --- | --- |
+| PayGuard Gatekeeper | `CDKNJSCK3DUCBJBTEFIYCGNZINAEKFBR24WNUVHCLCPUZJEBHDGLQCUK` | [View contract](https://stellar.expert/explorer/testnet/contract/CDKNJSCK3DUCBJBTEFIYCGNZINAEKFBR24WNUVHCLCPUZJEBHDGLQCUK) |
+| RISC Zero Groth16 Verifier | `CAHYIV4H2AWIXW5OQZO5EK4VOKLROLNGMB3AGJBR46XC63JKB3VM5CO5` | [View contract](https://stellar.expert/explorer/testnet/contract/CAHYIV4H2AWIXW5OQZO5EK4VOKLROLNGMB3AGJBR46XC63JKB3VM5CO5) |
+| Gatekeeper deploy transaction | `4d01e0f970feddea871e0e296f481e42b0f732679c71ef4888aab2aa60bfe32c` | [View transaction](https://stellar.expert/explorer/testnet/tx/4d01e0f970feddea871e0e296f481e42b0f732679c71ef4888aab2aa60bfe32c) |
+| Verifier deploy transaction | `2dbb911ec30bc4d7e6a611ea91b4e5d325af46a6558f6efda2910a356df3e57d` | [View transaction](https://stellar.expert/explorer/testnet/tx/2dbb911ec30bc4d7e6a611ea91b4e5d325af46a6558f6efda2910a356df3e57d) |
+| RISC Zero image ID | `b0c26f9bf9a887389b8004d1f105529641b10140ad42ed0cbfb6fcb7ee51e461` | Verifies the PayGuard zkVM guest |
+| Groth16 selector | `73c457ba` | RISC Zero verifier selector |
 
 ## 🌐 Live Backend
 
-The PayGuard API is deployed as a Hugging Face Docker Space:
+The PayGuard API is deployed as a Hugging Face Docker Space.
 
-```text
-https://huggingface.co/spaces/NikhilRaikwar/payguard-api
-```
-
-Health:
-
-```text
-https://nikhilraikwar-payguard-api.hf.space/v1/health
-```
-
-Config:
-
-```text
-https://nikhilraikwar-payguard-api.hf.space/v1/config
-```
+| Endpoint | Link |
+| --- | --- |
+| Hugging Face Space | [NikhilRaikwar/payguard-api](https://huggingface.co/spaces/NikhilRaikwar/payguard-api) |
+| Health check | [GET /v1/health](https://nikhilraikwar-payguard-api.hf.space/v1/health) |
+| Runtime config | [GET /v1/config](https://nikhilraikwar-payguard-api.hf.space/v1/config) |
 
 ## 🔒 Privacy Boundary
 
