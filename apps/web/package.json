@@ -8,7 +8,7 @@
     "build": "tsc -p tsconfig.json && vite build",
     "preview": "vite preview --host 0.0.0.0",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "build:web": "cd ../.. && npm run build:web && cd apps/web"
+    "build:web": "cd ../.. && npm run build:web && cp -r apps/web/dist dist && cd apps/web"
 
   },
   "dependencies": {
