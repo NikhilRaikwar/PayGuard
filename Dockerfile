@@ -40,7 +40,7 @@ RUN --mount=type=secret,id=GITHUB_TOKEN \
 
 WORKDIR /app
 
-COPY package.json package-lock.json ./
+COPY package.json ./
 COPY apps ./apps
 COPY services ./services
 COPY packages ./packages
@@ -50,8 +50,6 @@ RUN sed -i 's/\r$//' scripts/*.sh && chmod +x scripts/*.sh
 COPY tsconfig.base.json ./
 
 RUN npm install -g npm@latest
-
-RUN rm -f package-lock.json
 
 RUN npm install
 
