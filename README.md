@@ -114,6 +114,23 @@ RISC Zero Groth16 seal selector:
 73c457ba
 ```
 
+## Hugging Face Backend
+
+The PayGuard API is deployed as a Docker Space on Hugging Face:
+
+```text
+https://huggingface.co/spaces/NikhilRaikwar/payguard-api
+```
+
+Runtime endpoints:
+
+```text
+https://nikhilraikwar-payguard-api.hf.space/v1/health
+https://nikhilraikwar-payguard-api.hf.space/v1/config
+```
+
+The backend exposes the OpenAI payment-intent API, proof-job lifecycle API, and active contract configuration used by the dashboard.
+
 ## Technical ZK Boundary
 
 The host prover in `zk/risc0/host` runs the PayGuard guest with `ProverOpts::groth16()` and encodes the proof with `risc0-ethereum-contracts::encode_seal`.
