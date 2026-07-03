@@ -2,8 +2,28 @@
 resolver = "2"
 members = [
   "contracts/payguard_gatekeeper",
-  "contracts/payguard_attestation_verifier"
+  "contracts/risc0-interface",
+  "contracts/payguard_risc0_verifier",
+  "tools/build-utils"
 ]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+ark-bn254 = "0.5.0"
+ark-ec = "0.5.0"
+ark-ff = "0.5.0"
+ark-serialize = "0.5.0"
+build-utils = { path = "tools/build-utils" }
+hex = "0.4.3"
+risc0-interface = { path = "contracts/risc0-interface" }
+serde = "1.0"
+serde_json = "1.0"
+sha2 = "0.10"
+soroban-sdk = "25.1.0"
 
 [profile.release]
 opt-level = "z"

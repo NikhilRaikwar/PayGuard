@@ -8,8 +8,8 @@ license.workspace = true
 anyhow.workspace = true
 hex.workspace = true
 payguard-risc0-methods = { path = "../methods" }
+risc0-ethereum-contracts = "3.0.1"
 risc0-zkvm.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
-

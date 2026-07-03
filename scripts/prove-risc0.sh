@@ -2,8 +2,4 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$ROOT/zk/risc0"
-
-source "${HOME}/.bashrc" >/dev/null 2>&1 || true
-cargo run --release -p payguard-risc0-prover
-
+"$ROOT/scripts/prove-risc0-groth16.sh"

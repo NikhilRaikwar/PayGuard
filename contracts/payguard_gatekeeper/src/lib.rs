@@ -2,7 +2,7 @@
 
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, symbol_short, token, Address, Bytes,
-    BytesN, Env, IntoVal, Symbol, Val, Vec,
+    BytesN, Env,
 };
 
 const DAY_SECONDS: u64 = 86_400;
@@ -97,8 +97,12 @@ impl PayGuardGatekeeper {
     ) {
         env.storage().instance().set(&DataKey::Verifier, &verifier);
         env.storage().instance().set(&DataKey::ImageId, &image_id);
-        env.storage().instance().set(&DataKey::NetworkHash, &network_hash);
-        env.storage().instance().extend_ttl(TTL_THRESHOLD, TTL_EXTEND_TO);
+        env.storage()
+            .instance()
+            .set(&DataKey::NetworkHash, &network_hash);
+        env.storage()
+            .instance()
+            .extend_ttl(TTL_THRESHOLD, TTL_EXTEND_TO);
     }
 
     pub fn register_policy(
@@ -124,35 +128,73 @@ impl PayGuardGatekeeper {
             spent: 0,
             nonce: 0,
         };
-        env.storage().persistent().set(&DataKey::Policy(policy_id.clone()), &state);
-        env.storage().persistent().set(&DataKey::Executor(policy_id.clone(), executor.clone()), &true);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Policy(policy_id.clone()), &state);
+        env.storage().persistent().set(
+            &DataKey::Executor(policy_id.clone(), executor.clone()),
+            &true,
+        );
         env.storage().persistent().set(
             &DataKey::Stats(policy_id.clone()),
-            &PolicyStats { approved: 0, denied: 0, total_paid: 0 },
+            &PolicyStats {
+                approved: 0,
+                denied: 0,
+                total_paid: 0,
+            },
         );
         extend(&env, &policy_id, &executor);
-        env.events().publish((symbol_short!("policy"), policy_id.clone()), (owner, executor, token, policy_hash));
+        env.events().publish(
+            (symbol_short!("policy"), policy_id.clone()),
+            (owner, executor, token, policy_hash),
+        );
         policy_id
     }
 
-    pub fn set_executor(env: Env, policy_id: BytesN<32>, executor: Address, enabled: bool) -> Result<(), PayGuardError> {
+    pub fn set_executor(
+        env: Env,
+        policy_id: BytesN<32>,
+        executor: Address,
+        enabled: bool,
+    ) -> Result<(), PayGuardError> {
         let state = load_policy(&env, &policy_id)?;
         state.owner.require_auth();
-        env.storage().persistent().set(&DataKey::Executor(policy_id.clone(), executor.clone()), &enabled);
+        env.storage().persistent().set(
+            &DataKey::Executor(policy_id.clone(), executor.clone()),
+            &enabled,
+        );
         extend(&env, &policy_id, &executor);
-        env.events().publish((symbol_short!("executor"), policy_id), (executor, enabled));
+        env.events()
+            .publish((symbol_short!("executor"), policy_id), (executor, enabled));
         Ok(())
     }
 
-    pub fn fund_policy(env: Env, policy_id: BytesN<32>, from: Address, amount: i128) -> Result<(), PayGuardError> {
-        if amount <= 0 { return Err(PayGuardError::InvalidAmount); }
+    pub fn fund_policy(
+        env: Env,
+        policy_id: BytesN<32>,
+        from: Address,
+        amount: i128,
+    ) -> Result<(), PayGuardError> {
+        if amount <= 0 {
+            return Err(PayGuardError::InvalidAmount);
+        }
         let mut state = load_policy(&env, &policy_id)?;
         state.owner.require_auth();
         from.require_auth();
-        token::Client::new(&env, &state.token).transfer(&from, &env.current_contract_address(), &amount);
-        state.vault_balance = state.vault_balance.checked_add(amount).ok_or(PayGuardError::ArithmeticOverflow)?;
+        token::Client::new(&env, &state.token).transfer(
+            &from,
+            &env.current_contract_address(),
+            &amount,
+        );
+        state.vault_balance = state
+            .vault_balance
+            .checked_add(amount)
+            .ok_or(PayGuardError::ArithmeticOverflow)?;
         store_policy(&env, &policy_id, &state);
-        env.events().publish((symbol_short!("funded"), policy_id), (from, amount, state.vault_balance));
+        env.events().publish(
+            (symbol_short!("funded"), policy_id),
+            (from, amount, state.vault_balance),
+        );
         Ok(())
     }
 
@@ -165,9 +207,17 @@ impl PayGuardGatekeeper {
     ) -> Result<(), PayGuardError> {
         executor.require_auth();
         let mut state = load_policy(&env, &policy_id)?;
-        if !state.active { return Err(PayGuardError::PolicyInactive); }
-        let enabled: bool = env.storage().persistent().get(&DataKey::Executor(policy_id.clone(), executor.clone())).unwrap_or(false);
-        if !enabled { return Err(PayGuardError::UnauthorizedExecutor); }
+        if !state.active {
+            return Err(PayGuardError::PolicyInactive);
+        }
+        let enabled: bool = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Executor(policy_id.clone(), executor.clone()))
+            .unwrap_or(false);
+        if !enabled {
+            return Err(PayGuardError::UnauthorizedExecutor);
+        }
         validate(&env, &policy_id, &executor, &state, &journal)?;
 
         let digest = journal_digest(&env, &journal);
@@ -175,43 +225,95 @@ impl PayGuardGatekeeper {
         let image_id: BytesN<32> = env.storage().instance().get(&DataKey::ImageId).unwrap();
         verify_risc0(&env, verifier, seal, image_id, digest.clone());
 
-        let mut stats: PolicyStats = env.storage().persistent().get(&DataKey::Stats(policy_id.clone())).unwrap();
-        state.nonce = state.nonce.checked_add(1).ok_or(PayGuardError::ArithmeticOverflow)?;
+        let mut stats: PolicyStats = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Stats(policy_id.clone()))
+            .unwrap();
+        state.nonce = state
+            .nonce
+            .checked_add(1)
+            .ok_or(PayGuardError::ArithmeticOverflow)?;
         state.spent_day = journal.day_index;
         state.spent = journal.spent_after;
         state.vault_balance = journal.vault_after;
         if journal.approved {
-            stats.approved = stats.approved.checked_add(1).ok_or(PayGuardError::ArithmeticOverflow)?;
-            stats.total_paid = stats.total_paid.checked_add(journal.amount).ok_or(PayGuardError::ArithmeticOverflow)?;
-            token::Client::new(&env, &state.token).transfer(&env.current_contract_address(), &journal.recipient, &journal.amount);
-            env.events().publish((symbol_short!("approved"), policy_id.clone()), (journal.recipient, journal.amount, journal.nonce, digest));
+            stats.approved = stats
+                .approved
+                .checked_add(1)
+                .ok_or(PayGuardError::ArithmeticOverflow)?;
+            stats.total_paid = stats
+                .total_paid
+                .checked_add(journal.amount)
+                .ok_or(PayGuardError::ArithmeticOverflow)?;
+            token::Client::new(&env, &state.token).transfer(
+                &env.current_contract_address(),
+                &journal.recipient,
+                &journal.amount,
+            );
+            env.events().publish(
+                (symbol_short!("approved"), policy_id.clone()),
+                (journal.recipient, journal.amount, journal.nonce, digest),
+            );
         } else {
-            stats.denied = stats.denied.checked_add(1).ok_or(PayGuardError::ArithmeticOverflow)?;
-            env.events().publish((symbol_short!("denied"), policy_id.clone()), (journal.recipient, journal.amount, journal.violation, digest));
+            stats.denied = stats
+                .denied
+                .checked_add(1)
+                .ok_or(PayGuardError::ArithmeticOverflow)?;
+            env.events().publish(
+                (symbol_short!("denied"), policy_id.clone()),
+                (journal.recipient, journal.amount, journal.violation, digest),
+            );
         }
         store_policy(&env, &policy_id, &state);
-        env.storage().persistent().set(&DataKey::Stats(policy_id), &stats);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Stats(policy_id), &stats);
         Ok(())
     }
 
-    pub fn set_policy_active(env: Env, policy_id: BytesN<32>, active: bool) -> Result<(), PayGuardError> {
+    pub fn set_policy_active(
+        env: Env,
+        policy_id: BytesN<32>,
+        active: bool,
+    ) -> Result<(), PayGuardError> {
         let mut state = load_policy(&env, &policy_id)?;
         state.owner.require_auth();
         state.active = active;
         store_policy(&env, &policy_id, &state);
-        env.events().publish((symbol_short!("status"), policy_id), active);
+        env.events()
+            .publish((symbol_short!("status"), policy_id), active);
         Ok(())
     }
 
-    pub fn withdraw(env: Env, policy_id: BytesN<32>, destination: Address, amount: i128) -> Result<(), PayGuardError> {
-        if amount <= 0 { return Err(PayGuardError::InvalidAmount); }
+    pub fn withdraw(
+        env: Env,
+        policy_id: BytesN<32>,
+        destination: Address,
+        amount: i128,
+    ) -> Result<(), PayGuardError> {
+        if amount <= 0 {
+            return Err(PayGuardError::InvalidAmount);
+        }
         let mut state = load_policy(&env, &policy_id)?;
         state.owner.require_auth();
-        if amount > state.vault_balance { return Err(PayGuardError::InsufficientVault); }
-        state.vault_balance = state.vault_balance.checked_sub(amount).ok_or(PayGuardError::ArithmeticOverflow)?;
+        if amount > state.vault_balance {
+            return Err(PayGuardError::InsufficientVault);
+        }
+        state.vault_balance = state
+            .vault_balance
+            .checked_sub(amount)
+            .ok_or(PayGuardError::ArithmeticOverflow)?;
         store_policy(&env, &policy_id, &state);
-        token::Client::new(&env, &state.token).transfer(&env.current_contract_address(), &destination, &amount);
-        env.events().publish((symbol_short!("withdraw"), policy_id), (destination, amount, state.vault_balance));
+        token::Client::new(&env, &state.token).transfer(
+            &env.current_contract_address(),
+            &destination,
+            &amount,
+        );
+        env.events().publish(
+            (symbol_short!("withdraw"), policy_id),
+            (destination, amount, state.vault_balance),
+        );
         Ok(())
     }
 
@@ -220,35 +322,85 @@ impl PayGuardGatekeeper {
     }
 
     pub fn get_stats(env: Env, policy_id: BytesN<32>) -> Result<PolicyStats, PayGuardError> {
-        env.storage().persistent().get(&DataKey::Stats(policy_id)).ok_or(PayGuardError::PolicyNotFound)
+        env.storage()
+            .persistent()
+            .get(&DataKey::Stats(policy_id))
+            .ok_or(PayGuardError::PolicyNotFound)
     }
 }
 
-fn verify_risc0(env: &Env, verifier: Address, seal: Bytes, image_id: BytesN<32>, journal_digest: BytesN<32>) {
-    let args: Vec<Val> = (seal, image_id, journal_digest).into_val(env);
-    env.invoke_contract::<()>(&verifier, &Symbol::new(env, "verify"), args);
+fn verify_risc0(
+    env: &Env,
+    verifier: Address,
+    seal: Bytes,
+    image_id: BytesN<32>,
+    contract_journal_digest: BytesN<32>,
+) {
+    let receipt_journal_digest = env
+        .crypto()
+        .sha256(&contract_journal_digest.clone().into())
+        .to_bytes();
+    let client = risc0_interface::RiscZeroVerifierClient::new(env, &verifier);
+    client.verify(&seal, &image_id, &receipt_journal_digest);
 }
 
-fn validate(env: &Env, policy_id: &BytesN<32>, executor: &Address, state: &PolicyState, journal: &DecisionJournal) -> Result<(), PayGuardError> {
+fn validate(
+    env: &Env,
+    policy_id: &BytesN<32>,
+    executor: &Address,
+    state: &PolicyState,
+    journal: &DecisionJournal,
+) -> Result<(), PayGuardError> {
     let network_hash: BytesN<32> = env.storage().instance().get(&DataKey::NetworkHash).unwrap();
-    if journal.network_hash != network_hash || journal.gatekeeper != env.current_contract_address() { return Err(PayGuardError::DomainMismatch); }
-    if &journal.policy_id != policy_id || journal.policy_hash != state.policy_hash { return Err(PayGuardError::PolicyMismatch); }
-    if journal.token != state.token { return Err(PayGuardError::TokenMismatch); }
-    if &journal.executor != executor { return Err(PayGuardError::ExecutorMismatch); }
-    if journal.nonce != state.nonce { return Err(PayGuardError::NonceMismatch); }
-    if journal.amount <= 0 { return Err(PayGuardError::InvalidAmount); }
+    if journal.network_hash != network_hash || journal.gatekeeper != env.current_contract_address()
+    {
+        return Err(PayGuardError::DomainMismatch);
+    }
+    if &journal.policy_id != policy_id || journal.policy_hash != state.policy_hash {
+        return Err(PayGuardError::PolicyMismatch);
+    }
+    if journal.token != state.token {
+        return Err(PayGuardError::TokenMismatch);
+    }
+    if &journal.executor != executor {
+        return Err(PayGuardError::ExecutorMismatch);
+    }
+    if journal.nonce != state.nonce {
+        return Err(PayGuardError::NonceMismatch);
+    }
+    if journal.amount <= 0 {
+        return Err(PayGuardError::InvalidAmount);
+    }
     let current_day = env.ledger().timestamp() / DAY_SECONDS;
-    if journal.day_index != current_day { return Err(PayGuardError::DayMismatch); }
-    let expected_spent = if state.spent_day == current_day { state.spent } else { 0 };
-    if journal.spent_before != expected_spent || journal.vault_before != state.vault_balance { return Err(PayGuardError::StateMismatch); }
+    if journal.day_index != current_day {
+        return Err(PayGuardError::DayMismatch);
+    }
+    let expected_spent = if state.spent_day == current_day {
+        state.spent
+    } else {
+        0
+    };
+    if journal.spent_before != expected_spent || journal.vault_before != state.vault_balance {
+        return Err(PayGuardError::StateMismatch);
+    }
     if journal.approved {
         if journal.violation != 0
-            || journal.spent_after != expected_spent.checked_add(journal.amount).ok_or(PayGuardError::ArithmeticOverflow)?
-            || journal.vault_after != state.vault_balance.checked_sub(journal.amount).ok_or(PayGuardError::InsufficientVault)?
+            || journal.spent_after
+                != expected_spent
+                    .checked_add(journal.amount)
+                    .ok_or(PayGuardError::ArithmeticOverflow)?
+            || journal.vault_after
+                != state
+                    .vault_balance
+                    .checked_sub(journal.amount)
+                    .ok_or(PayGuardError::InsufficientVault)?
         {
             return Err(PayGuardError::InvalidDecision);
         }
-    } else if journal.violation == 0 || journal.spent_after != expected_spent || journal.vault_after != state.vault_balance {
+    } else if journal.violation == 0
+        || journal.spent_after != expected_spent
+        || journal.vault_after != state.vault_balance
+    {
         return Err(PayGuardError::InvalidDecision);
     }
     Ok(())
@@ -266,7 +418,10 @@ fn journal_digest(env: &Env, journal: &DecisionJournal) -> BytesN<32> {
     bytes.append(&Bytes::from_array(env, &journal.vault_before.to_be_bytes()));
     bytes.append(&Bytes::from_array(env, &journal.vault_after.to_be_bytes()));
     bytes.append(&Bytes::from_array(env, &journal.nonce.to_be_bytes()));
-    bytes.append(&Bytes::from_array(env, &journal.proof_timestamp.to_be_bytes()));
+    bytes.append(&Bytes::from_array(
+        env,
+        &journal.proof_timestamp.to_be_bytes(),
+    ));
     bytes.append(&Bytes::from_array(env, &[journal.approved as u8]));
     bytes.append(&Bytes::from_array(env, &journal.violation.to_be_bytes()));
     bytes.append(&journal.intent_digest.clone().into());
@@ -274,20 +429,45 @@ fn journal_digest(env: &Env, journal: &DecisionJournal) -> BytesN<32> {
 }
 
 fn load_policy(env: &Env, policy_id: &BytesN<32>) -> Result<PolicyState, PayGuardError> {
-    env.storage().persistent().get(&DataKey::Policy(policy_id.clone())).ok_or(PayGuardError::PolicyNotFound)
+    env.storage()
+        .persistent()
+        .get(&DataKey::Policy(policy_id.clone()))
+        .ok_or(PayGuardError::PolicyNotFound)
 }
 
 fn store_policy(env: &Env, policy_id: &BytesN<32>, state: &PolicyState) {
     let key = DataKey::Policy(policy_id.clone());
     env.storage().persistent().set(&key, state);
-    env.storage().persistent().extend_ttl(&key, TTL_THRESHOLD, TTL_EXTEND_TO);
-    env.storage().persistent().extend_ttl(&DataKey::Stats(policy_id.clone()), TTL_THRESHOLD, TTL_EXTEND_TO);
-    env.storage().instance().extend_ttl(TTL_THRESHOLD, TTL_EXTEND_TO);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, TTL_THRESHOLD, TTL_EXTEND_TO);
+    env.storage().persistent().extend_ttl(
+        &DataKey::Stats(policy_id.clone()),
+        TTL_THRESHOLD,
+        TTL_EXTEND_TO,
+    );
+    env.storage()
+        .instance()
+        .extend_ttl(TTL_THRESHOLD, TTL_EXTEND_TO);
 }
 
 fn extend(env: &Env, policy_id: &BytesN<32>, executor: &Address) {
-    env.storage().persistent().extend_ttl(&DataKey::Policy(policy_id.clone()), TTL_THRESHOLD, TTL_EXTEND_TO);
-    env.storage().persistent().extend_ttl(&DataKey::Executor(policy_id.clone(), executor.clone()), TTL_THRESHOLD, TTL_EXTEND_TO);
-    env.storage().persistent().extend_ttl(&DataKey::Stats(policy_id.clone()), TTL_THRESHOLD, TTL_EXTEND_TO);
-    env.storage().instance().extend_ttl(TTL_THRESHOLD, TTL_EXTEND_TO);
+    env.storage().persistent().extend_ttl(
+        &DataKey::Policy(policy_id.clone()),
+        TTL_THRESHOLD,
+        TTL_EXTEND_TO,
+    );
+    env.storage().persistent().extend_ttl(
+        &DataKey::Executor(policy_id.clone(), executor.clone()),
+        TTL_THRESHOLD,
+        TTL_EXTEND_TO,
+    );
+    env.storage().persistent().extend_ttl(
+        &DataKey::Stats(policy_id.clone()),
+        TTL_THRESHOLD,
+        TTL_EXTEND_TO,
+    );
+    env.storage()
+        .instance()
+        .extend_ttl(TTL_THRESHOLD, TTL_EXTEND_TO);
 }

@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use payguard_risc0_methods::{PAYGUARD_RISC0_GUEST_ELF, PAYGUARD_RISC0_GUEST_ID};
-use risc0_zkvm::{default_prover, ExecutorEnv};
+use risc0_ethereum_contracts::encode_seal;
+use risc0_zkvm::{default_prover, ExecutorEnv, ProverOpts};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::io::{self, Read};
@@ -39,18 +40,36 @@ struct ProverInput {
     vault_balance: String,
     #[serde(rename = "proofDate")]
     proof_date: String,
+    #[serde(rename = "executionContext")]
+    execution_context: ExecutionContext,
 }
 
 #[derive(Deserialize, Serialize)]
-struct GuestJournal {
-    approved: bool,
-    violation: u32,
+struct ExecutionContext {
+    #[serde(rename = "networkHash")]
+    network_hash: String,
+    #[serde(rename = "policyId")]
+    policy_id: String,
     #[serde(rename = "policyHash")]
     policy_hash: String,
+    amount: String,
+    #[serde(rename = "dayIndex")]
+    day_index: String,
+    #[serde(rename = "spentBefore")]
+    spent_before: String,
+    #[serde(rename = "spentAfter")]
+    spent_after: String,
+    #[serde(rename = "vaultBefore")]
+    vault_before: String,
+    #[serde(rename = "vaultAfter")]
+    vault_after: String,
+    nonce: String,
+    #[serde(rename = "proofTimestamp")]
+    proof_timestamp: String,
+    approved: bool,
+    violation: u32,
     #[serde(rename = "intentDigest")]
     intent_digest: String,
-    #[serde(rename = "journalDigest")]
-    journal_digest: String,
 }
 
 #[derive(Serialize)]
@@ -63,6 +82,10 @@ struct ApiOutput {
     intent_digest: String,
     #[serde(rename = "journalDigest")]
     journal_digest: String,
+    #[serde(rename = "contractJournalDigest")]
+    contract_journal_digest: String,
+    #[serde(rename = "receiptJournalDigest")]
+    receipt_journal_digest: String,
     #[serde(rename = "imageId")]
     image_id: String,
     #[serde(rename = "sealHex")]
@@ -85,29 +108,39 @@ fn main() -> Result<()> {
         .build()
         .context("failed to build executor env")?;
     let receipt = default_prover()
-        .prove(env, PAYGUARD_RISC0_GUEST_ELF)
+        .prove_with_opts(env, PAYGUARD_RISC0_GUEST_ELF, &ProverOpts::groth16())
         .context("failed to prove PayGuard policy method")?
         .receipt;
     receipt
         .verify(PAYGUARD_RISC0_GUEST_ID)
         .context("RISC Zero receipt verification failed")?;
-    let journal: GuestJournal = receipt.journal.decode().context("failed to decode receipt journal")?;
     let journal_bytes = receipt.journal.bytes.clone();
-    let seal_hex = hex::encode(Sha256::digest(&journal_bytes));
+    if journal_bytes.len() != 32 {
+        anyhow::bail!("PayGuard guest journal must be the 32-byte contract journal digest");
+    }
+    let seal = encode_seal(&receipt).context("failed to encode Groth16 seal")?;
+    let contract_journal_digest = hex::encode(&journal_bytes);
+    let receipt_journal_digest = hex::encode(Sha256::digest(&journal_bytes));
     let out = ApiOutput {
-        approved: journal.approved,
-        violation: journal.violation,
-        policy_hash: journal.policy_hash,
-        intent_digest: journal.intent_digest,
-        journal_digest: journal.journal_digest,
+        approved: input.execution_context.approved,
+        violation: input.execution_context.violation,
+        policy_hash: clean_hex(&input.execution_context.policy_hash),
+        intent_digest: clean_hex(&input.execution_context.intent_digest),
+        journal_digest: receipt_journal_digest.clone(),
+        contract_journal_digest,
+        receipt_journal_digest,
         image_id: hex::encode(bytemuck_words(PAYGUARD_RISC0_GUEST_ID)),
-        seal_hex,
+        seal_hex: hex::encode(seal),
         receipt_journal_hex: hex::encode(journal_bytes),
         receipt_verified: true,
-        mode: "risc0-local-receipt",
+        mode: "risc0-groth16-local",
     };
     println!("{}", serde_json::to_string(&out)?);
     Ok(())
+}
+
+fn clean_hex(value: &str) -> String {
+    value.strip_prefix("0x").unwrap_or(value).to_ascii_lowercase()
 }
 
 fn bytemuck_words(words: [u32; 8]) -> [u8; 32] {

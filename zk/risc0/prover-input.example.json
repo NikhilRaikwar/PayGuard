@@ -21,5 +21,21 @@
   },
   "spentToday": "135",
   "vaultBalance": "840",
-  "proofDate": "2026-07-02"
+  "proofDate": "2026-07-02",
+  "executionContext": {
+    "networkHash": "cee0302d59844d32bdca915c8203dd44b33fbb7edc19051ea37abedf28ecd472",
+    "policyId": "21d323f9363254d6884db0e123654828bdc71fbcb8b45c3f79848cb2b5a46c93",
+    "policyHash": "21d323f9363254d6884db0e123654828bdc71fbcb8b45c3f79848cb2b5a46c93",
+    "amount": "300000000",
+    "dayIndex": "20636",
+    "spentBefore": "1350000000",
+    "spentAfter": "1650000000",
+    "vaultBefore": "8400000000",
+    "vaultAfter": "8100000000",
+    "nonce": "0",
+    "proofTimestamp": "1782950400",
+    "approved": true,
+    "violation": 0,
+    "intentDigest": "9f23d1271b2c6c8c92b4ce4e6a7c32fa7a8d67339da38958c51447cb52072d0a"
+  }
 }
