@@ -330,7 +330,8 @@ async function runExternalProver(command: string, input: unknown): Promise<Prove
     child.on("close", (code) => {
       clearTimeout(timer);
       if (code !== 0) {
-        reject(new Error(`RISC Zero prover exited ${code} from ${rootDir} using "${resolvedCommand}": ${stderr || stdout}`));
+        const details = [stderr.trim(), stdout.trim()].filter(Boolean).join("\n");
+        reject(new Error(`RISC Zero prover exited ${code} from ${rootDir} using "${resolvedCommand}": ${details || "no stderr/stdout captured"}`));
         return;
       }
       try {

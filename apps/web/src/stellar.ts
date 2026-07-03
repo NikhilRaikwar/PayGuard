@@ -314,7 +314,7 @@ export async function executeDecision(params: {
 export async function getPolicyState(policyId: string): Promise<any> {
   if (!env.contractId) throw new Error("PayGuard contract ID not configured.");
   const policyIdBytes = scBytes32(policyId);
-  const dummySource = "GBZQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAM7R3";
+  const dummySource = StellarSdk.Keypair.random().publicKey();
   const contract = new StellarSdk.Contract(env.contractId);
 
   const account = new StellarSdk.Account(dummySource, "0");
@@ -341,7 +341,7 @@ export async function getPolicyState(policyId: string): Promise<any> {
 export async function getPolicyStats(policyId: string): Promise<any> {
   if (!env.contractId) throw new Error("PayGuard contract ID not configured.");
   const policyIdBytes = scBytes32(policyId);
-  const dummySource = "GBZQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAM7R3";
+  const dummySource = StellarSdk.Keypair.random().publicKey();
   const contract = new StellarSdk.Contract(env.contractId);
 
   const account = new StellarSdk.Account(dummySource, "0");
