@@ -1,0 +1,11 @@
+node_modules
+apps/*/dist
+services/*/dist
+packages/*/dist
+target
+zk/risc0/target
+.git
+.env
+.env.local
+*.log
+temp
