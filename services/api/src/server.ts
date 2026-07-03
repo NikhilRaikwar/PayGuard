@@ -169,9 +169,10 @@ async function proposePaymentIntent(prompt: string, allowlist: string[], aliases
       })
     });
     if (!response.ok) throw new Error(`OpenAI request failed: ${response.status}`);
-    const json = await response.json() as { output_text?: string };
-    if (!json.output_text) throw new Error("OpenAI response did not include output_text.");
-    return JSON.parse(json.output_text) as PaymentIntent;
+    const json = await response.json();
+    const outputText = extractOpenAiText(json);
+    if (!outputText) throw new Error("OpenAI response did not include parseable output text.");
+    return JSON.parse(outputText) as PaymentIntent;
   }
 
   return heuristicIntent(prompt, allowlist, aliases);
@@ -202,6 +203,24 @@ function heuristicIntent(prompt: string, allowlist: string[], aliases: Record<st
       : `Recipient is not currently allowlisted, so the ZK policy proof should produce a verified denial.`,
     riskLevel
   };
+}
+
+function extractOpenAiText(json: unknown): string {
+  if (typeof json !== "object" || json === null) return "";
+  const maybe = json as { output_text?: unknown; output?: unknown };
+  if (typeof maybe.output_text === "string") return maybe.output_text;
+  if (!Array.isArray(maybe.output)) return "";
+  for (const item of maybe.output) {
+    if (typeof item !== "object" || item === null) continue;
+    const content = (item as { content?: unknown }).content;
+    if (!Array.isArray(content)) continue;
+    for (const part of content) {
+      if (typeof part !== "object" || part === null) continue;
+      const text = (part as { text?: unknown }).text;
+      if (typeof text === "string") return text;
+    }
+  }
+  return "";
 }
 
 async function runProofJob(

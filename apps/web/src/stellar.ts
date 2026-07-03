@@ -13,6 +13,8 @@ export const env = {
   rpcUrl: import.meta.env.VITE_STELLAR_RPC_URL ?? "https://soroban-testnet.stellar.org",
   horizonUrl: import.meta.env.VITE_STELLAR_HORIZON_URL ?? "https://horizon-testnet.stellar.org",
   contractId: import.meta.env.VITE_PAYGUARD_CONTRACT_ID ?? "",
+  verifierContractId: import.meta.env.VITE_PAYGUARD_VERIFIER_CONTRACT_ID ?? "",
+  risc0ImageId: import.meta.env.VITE_PAYGUARD_RISC0_IMAGE_ID ?? "",
   tokenContractId: import.meta.env.VITE_PAYGUARD_TOKEN_CONTRACT_ID ?? ""
 };
 
@@ -49,6 +51,32 @@ export async function rpcHealth() {
     return { ok: health.status === "healthy", status: health.status, ledger: ledger.sequence };
   } catch (error) {
     return { ok: false, status: error instanceof Error ? error.message : "offline", ledger: null };
+  }
+}
+
+export async function apiStatus() {
+  try {
+    const [health, config] = await Promise.all([
+      fetch(`${env.apiUrl}/v1/health`).then((r) => r.json()),
+      fetch(`${env.apiUrl}/v1/config`).then((r) => r.json())
+    ]);
+    return {
+      ok: true,
+      openai: Boolean(health.openai),
+      realProverConfigured: Boolean(health.realProverConfigured),
+      contractId: config.contractId || env.contractId,
+      verifierContractId: config.verifierContractId || env.verifierContractId,
+      tokenContractId: config.tokenContractId || env.tokenContractId
+    };
+  } catch {
+    return {
+      ok: false,
+      openai: false,
+      realProverConfigured: false,
+      contractId: env.contractId,
+      verifierContractId: env.verifierContractId,
+      tokenContractId: env.tokenContractId
+    };
   }
 }
 

@@ -32,7 +32,7 @@ import {
   type PolicyDefinition,
   ViolationCode
 } from "@payguard/protocol";
-import { connectFreighter, env, restoreFreighter, rpcHealth, stellarExpertTx } from "./stellar";
+import { apiStatus, connectFreighter, env, restoreFreighter, rpcHealth, stellarExpertTx } from "./stellar";
 
 type View = "dashboard" | "agent" | "policy-builder" | "policies" | "proof-log" | "settings";
 type EventRow = {
@@ -45,6 +45,7 @@ type EventRow = {
   proof: string;
   txHash?: string;
 };
+type ApiStatus = Awaited<ReturnType<typeof apiStatus>>;
 
 const vendorA = "GBTZAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAX4K2";
 const vendorB = "GBZQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAM7R3";
@@ -76,10 +77,12 @@ export function App() {
   const [events, setEvents] = useState<EventRow[]>(seedEvents);
   const [toast, setToast] = useState<{ message: string; tone: "success" | "warn" | "error" | "info" } | null>(null);
   const [health, setHealth] = useState<{ ok: boolean; status: string; ledger: number | null }>({ ok: false, status: "checking", ledger: null });
+  const [api, setApi] = useState<ApiStatus>({ ok: false, openai: false, realProverConfigured: false, contractId: env.contractId, verifierContractId: env.verifierContractId, tokenContractId: env.tokenContractId });
 
   useEffect(() => {
     restoreFreighter().then(setWallet).catch(() => undefined);
     rpcHealth().then(setHealth);
+    apiStatus().then(setApi);
   }, []);
 
   useEffect(() => {
@@ -138,17 +141,17 @@ export function App() {
           <div className="topbar-title">{pageTitle(view)}</div>
           <div className="topbar-right">
             <span className={`sc-badge ${health.ok ? "green" : "red"}`}>RPC {health.status}</span>
-            <button className="btn-sm ghost" onClick={() => rpcHealth().then(setHealth)}><RefreshCcw size={14} /> Refresh</button>
+            <button className="btn-sm ghost" onClick={() => { rpcHealth().then(setHealth); apiStatus().then(setApi); }}><RefreshCcw size={14} /> Refresh</button>
             <button className="btn-sm primary" onClick={() => setView("agent")}><Bot size={14} /> Ask Agent</button>
           </div>
         </header>
         <section className="content">
-          {view === "dashboard" && <Dashboard policyHash={policyHash} events={events} health={health} setView={setView} />}
-          {view === "agent" && <AgentConsole policy={policy} policyHash={policyHash} events={events} setEvents={setEvents} notify={notify} />}
+          {view === "dashboard" && <Dashboard policyHash={policyHash} events={events} health={health} api={api} setView={setView} />}
+          {view === "agent" && <AgentConsole policy={policy} policyHash={policyHash} events={events} setEvents={setEvents} notify={notify} api={api} />}
           {view === "policy-builder" && <PolicyBuilder policy={policy} setPolicy={setPolicy} policyHash={policyHash} notify={notify} />}
           {view === "policies" && <Policies policy={policy} policyHash={policyHash} />}
           {view === "proof-log" && <ProofLog events={events} notify={notify} />}
-          {view === "settings" && <Settings wallet={wallet} disconnect={disconnect} health={health} />}
+          {view === "settings" && <Settings wallet={wallet} disconnect={disconnect} health={health} api={api} />}
         </section>
       </main>
       {!wallet && <WalletOverlay connect={connect} connecting={connecting} />}
@@ -347,7 +350,7 @@ function pageTitle(view: View) {
   return ({ dashboard: "Dashboard", agent: "Ask Agent", "policy-builder": "New Policy", policies: "My Policies", "proof-log": "Proof Log", settings: "Settings" } as Record<View, string>)[view];
 }
 
-function Dashboard({ policyHash, events, health, setView }: { policyHash: string; events: EventRow[]; health: { ok: boolean; status: string; ledger: number | null }; setView: (view: View) => void }) {
+function Dashboard({ policyHash, events, health, api, setView }: { policyHash: string; events: EventRow[]; health: { ok: boolean; status: string; ledger: number | null }; api: ApiStatus; setView: (view: View) => void }) {
   const verified = events.filter((e) => e.status === "VERIFIED").length;
   const blocked = events.filter((e) => e.status === "BLOCKED").length;
   return <>
@@ -377,14 +380,31 @@ function Dashboard({ policyHash, events, health, setView }: { policyHash: string
       </section>
     </div>
     <section className="card">
-      <div className="card-header"><span className="card-title">Quick actions</span><span className={`sc-badge ${health.ok ? "green" : "red"}`}>RPC {health.status}</span></div>
+      <div className="card-header"><span className="card-title">Quick actions</span><span className={`sc-badge ${api.realProverConfigured ? "green" : "amber"}`}>{api.realProverConfigured ? "RISC Zero live" : "Dev prover"}</span></div>
       <div className="quick-grid">
         <button className="quick-action" onClick={() => setView("agent")}><Bot size={22} /><b>Ask Agent</b><span>Propose a payment via AI</span></button>
         <button className="quick-action" onClick={() => setView("policy-builder")}><FileText size={22} /><b>New Policy</b><span>Create spending rules</span></button>
         <button className="quick-action" onClick={() => setView("proof-log")}><Activity size={22} /><b>Proof Log</b><span>View all payment proofs</span></button>
       </div>
     </section>
+    <section className="card">
+      <div className="card-header"><span className="card-title">Live integration</span><span className={`sc-badge ${health.ok && api.ok ? "green" : "red"}`}>{health.ok && api.ok ? "Online" : "Check API"}</span></div>
+      <div className="card-body integration-grid">
+        <IntegrationRow label="OpenAI intent API" value={api.openai ? "Configured" : "Fallback mode"} tone={api.openai ? "green" : "amber"} />
+        <IntegrationRow label="RISC Zero prover" value={api.realProverConfigured ? "Real receipt path" : "Dev evaluator"} tone={api.realProverConfigured ? "green" : "amber"} />
+        <IntegrationRow label="Gatekeeper" value={shortAddress(api.contractId || env.contractId)} tone={api.contractId ? "green" : "red"} href={contractLink(api.contractId || env.contractId)} />
+        <IntegrationRow label="Verifier" value={shortAddress(api.verifierContractId || env.verifierContractId)} tone={api.verifierContractId ? "green" : "red"} href={contractLink(api.verifierContractId || env.verifierContractId)} />
+      </div>
+    </section>
   </>;
+}
+
+function IntegrationRow({ label, value, tone, href }: { label: string; value: string; tone: "green" | "amber" | "red"; href?: string }) {
+  return <div className="integration-row"><span><b>{label}</b><small>{href ? <a href={href} target="_blank" rel="noreferrer">{value}</a> : value}</small></span><span className={`sc-badge ${tone}`}>{tone === "green" ? "Live" : tone === "amber" ? "Ready" : "Missing"}</span></div>;
+}
+
+function contractLink(id: string) {
+  return id ? `https://stellar.expert/explorer/testnet/contract/${id}` : "";
 }
 
 function Stat({ label, value, sub, badge, tone = "green" }: { label: string; value: string; sub: string; badge: string; tone?: "green" | "red" | "amber" }) {
@@ -405,7 +425,7 @@ function Field({ label, value, onChange, type = "text" }: { label: string; value
   return <label className="form-row"><span className="form-label">{label}</span><input className="form-input" type={type} value={value} onChange={(e) => onChange(e.target.value)} /></label>;
 }
 
-function AgentConsole({ policy, policyHash, events, setEvents, notify }: { policy: PolicyDefinition; policyHash: string; events: EventRow[]; setEvents: (events: EventRow[]) => void; notify: (m: string, t?: "success" | "warn" | "error" | "info") => void }) {
+function AgentConsole({ policy, policyHash, events, setEvents, notify, api }: { policy: PolicyDefinition; policyHash: string; events: EventRow[]; setEvents: (events: EventRow[]) => void; notify: (m: string, t?: "success" | "warn" | "error" | "info") => void; api: ApiStatus }) {
   const [prompt, setPrompt] = useState("Pay Vendor A 30 USDC for API usage this month");
   const [intent, setIntent] = useState<PaymentIntent | null>(null);
   const [proof, setProof] = useState<any>(null);
@@ -469,7 +489,7 @@ function AgentConsole({ policy, policyHash, events, setEvents, notify }: { polic
 
   const localDecision = useMemo(() => intent ? evaluatePolicy({ policy, intent, spentToday: "75", vaultBalance: "200" }) : null, [intent, policy]);
 
-  return <div className="two-col"><section className="card"><div className="card-header"><span className="card-title">Agent payment console</span><span className="card-sub">Server-side OpenAI + ZK policy check</span></div><div className="card-body"><textarea className="prompt-box" value={prompt} onChange={(e) => setPrompt(e.target.value)} /><div className="prompt-examples">{["Pay Vendor A 30 USDC for API usage", "Pay Vendor B 25 USDC for design work", "Pay unknown vendor 80 USDC"].map((x) => <button className="prompt-chip" onClick={() => setPrompt(x)} key={x}>{x}</button>)}</div><div className="button-row"><button className="btn-sm primary" disabled={busy} onClick={runAgent}><Bot size={14} /> Run agent</button><button className="btn-sm ghost" disabled={!intent || busy} onClick={generateProof}><Shield size={14} /> Generate proof</button></div>{intent && <IntentCard intent={intent} />}{step > 0 && <ProofSteps step={step} />}{proof && <ResultCard proof={proof} />}</div></section><section className="card"><div className="card-header"><span className="card-title">Active enforcement context</span></div><div className="card-body"><MiniRules /><HashBox label="Policy hash" value={policyHash} /><div className="settings-row"><span><b>Recipient validation</b><small>{intent ? isLikelyStellarAddress(intent.recipient) ? "Stellar G address" : "Invalid" : "waiting for intent"}</small></span></div><div className="settings-row"><span><b>Contract mode</b><small>{env.contractId ? "ready for Stellar tx" : "configure contract id for tx execution"}</small></span></div><small className="muted">Current proof job produces a policy decision and journal digest. Configure PAYGUARD_REAL_PROVER_CMD for final RISC Zero seal generation.</small></div></section></div>;
+  return <div className="two-col"><section className="card"><div className="card-header"><span className="card-title">Agent payment console</span><span className="card-sub">{api.openai ? "OpenAI + RISC Zero policy check" : "Fallback intent + policy check"}</span></div><div className="card-body"><textarea className="prompt-box" value={prompt} onChange={(e) => setPrompt(e.target.value)} /><div className="prompt-examples">{["Pay Vendor A 30 USDC for API usage", "Pay Vendor B 25 USDC for design work", "Pay unknown vendor 80 USDC"].map((x) => <button className="prompt-chip" onClick={() => setPrompt(x)} key={x}>{x}</button>)}</div><div className="button-row"><button className="btn-sm primary" disabled={busy} onClick={runAgent}><Bot size={14} /> Run agent</button><button className="btn-sm ghost" disabled={!intent || busy} onClick={generateProof}><Shield size={14} /> Generate proof</button></div>{intent && <IntentCard intent={intent} />}{step > 0 && <ProofSteps step={step} />}{proof && <ResultCard proof={proof} />}</div></section><section className="card"><div className="card-header"><span className="card-title">Active enforcement context</span><span className={`sc-badge ${api.realProverConfigured ? "green" : "amber"}`}>{api.realProverConfigured ? "RISC Zero" : "Dev"}</span></div><div className="card-body"><MiniRules /><HashBox label="Policy hash" value={policyHash} /><HashBox label="RISC ZERO IMAGE ID" value={env.risc0ImageId || "waiting for env"} /><div className="settings-row"><span><b>Recipient validation</b><small>{intent ? isLikelyStellarAddress(intent.recipient) ? "Stellar G address" : "Invalid" : "waiting for intent"}</small></span></div><div className="settings-row"><span><b>Contract mode</b><small>{api.contractId ? "testnet gatekeeper configured" : "configure contract id"}</small></span></div><div className="settings-row"><span><b>Verifier mode</b><small>{api.verifierContractId ? shortAddress(api.verifierContractId) : "not configured"}</small></span></div><small className="muted">With PAYGUARD_REAL_PROVER_CMD set, proof jobs call the local RISC Zero host, verify the receipt, then return the journal digest and seal for the Stellar verifier boundary.</small></div></section></div>;
 }
 
 function IntentCard({ intent }: { intent: PaymentIntent }) {
@@ -482,7 +502,7 @@ function ProofSteps({ step }: { step: number }) {
 
 function ResultCard({ proof }: { proof: any }) {
   const approved = Boolean(proof.approved);
-  return <div className={`result-card show ${approved ? "approved" : "blocked"}`}><div className="rc-icon">{approved ? <CheckCircle2 /> : <XCircle />}</div><span><div className="rc-title">{approved ? "Payment approved" : "Payment blocked"}</div><div className="rc-sub">{approved ? "Policy passed. Ready for contract execution." : `${violationName(proof.violation)} - no funds move.`}</div></span><code className="rc-hash">Proof: {String(proof.journalDigest).slice(0, 10)}...</code></div>;
+  return <div className={`result-card show ${approved ? "approved" : "blocked"}`}><div className="rc-icon">{approved ? <CheckCircle2 /> : <XCircle />}</div><span><div className="rc-title">{approved ? "Payment approved" : "Payment blocked"}</div><div className="rc-sub">{approved ? `Receipt ${proof.receiptVerified ? "verified" : "pending"} - ${proof.mode}` : `${violationName(proof.violation)} - no funds move.`}</div></span><code className="rc-hash">Digest: {String(proof.journalDigest).slice(0, 10)}...<br />Image: {String(proof.imageId || env.risc0ImageId).slice(0, 10)}...</code></div>;
 }
 
 function violationName(code: number) {
@@ -502,6 +522,6 @@ function ProofLog({ events, notify }: { events: EventRow[]; notify: (m: string) 
   return <section className="card"><div className="card-header"><span className="card-title">Proof audit log</span><button className="btn-sm ghost" onClick={download}><Download size={14} /> Export CSV</button></div><div className="log-table-wrap"><table className="log-table"><thead><tr><th>Time</th><th>Recipient</th><th>Amount</th><th>Status</th><th>Violation</th><th>Proof digest</th><th>Tx</th></tr></thead><tbody>{events.map((e) => <tr key={e.id}><td className="td-mono">{e.time}</td><td className="td-mono">{shortAddress(e.recipient)}</td><td>${e.amount} USDC</td><td><span className={`fr-badge ${e.status === "VERIFIED" ? "v" : "b"}`}>{e.status}</span></td><td>{e.violation}</td><td className="td-mono">{e.proof}</td><td>{e.txHash ? <a className="td-link" href={stellarExpertTx(e.txHash)}>View</a> : "-"}</td></tr>)}</tbody></table></div></section>;
 }
 
-function Settings({ wallet, disconnect, health }: { wallet: { address: string; network: string } | null; disconnect: () => void; health: { ok: boolean; status: string; ledger: number | null } }) {
-  return <div className="settings-col"><section className="card"><div className="card-header"><span className="card-title">Wallet and network</span></div><div className="card-body"><div className="settings-row"><span><b>Connected wallet</b><small>{wallet ? `${shortAddress(wallet.address)} (Freighter)` : "connect from the wallet overlay"}</small></span>{wallet && <button className="btn-sm danger" onClick={disconnect}>Disconnect</button>}</div><div className="settings-row"><span><b>Network</b><small>{env.network}</small></span><span className="sc-badge green">Testnet</span></div><div className="settings-row"><span><b>RPC</b><small>{health.ledger ? `ledger ${health.ledger}` : health.status}</small></span><span className={`sc-badge ${health.ok ? "green" : "red"}`}>{health.status}</span></div></div></section><section className="card"><div className="card-header"><span className="card-title">Contracts</span></div><div className="card-body"><div className="settings-row"><span><b>PayGuard Gatekeeper</b><small>{env.contractId || "not configured"}</small></span></div><div className="settings-row"><span><b>Attestation verifier</b><small>{import.meta.env.VITE_PAYGUARD_VERIFIER_CONTRACT_ID ?? "not configured"}</small></span></div><div className="settings-row"><span><b>Token contract</b><small>{env.tokenContractId || "not configured"}</small></span></div></div></section></div>;
+function Settings({ wallet, disconnect, health, api }: { wallet: { address: string; network: string } | null; disconnect: () => void; health: { ok: boolean; status: string; ledger: number | null }; api: ApiStatus }) {
+  return <div className="settings-col"><section className="card"><div className="card-header"><span className="card-title">Wallet and network</span></div><div className="card-body"><div className="settings-row"><span><b>Connected wallet</b><small>{wallet ? `${shortAddress(wallet.address)} (Freighter)` : "connect from the wallet overlay"}</small></span>{wallet && <button className="btn-sm danger" onClick={disconnect}>Disconnect</button>}</div><div className="settings-row"><span><b>Network</b><small>{env.network}</small></span><span className="sc-badge green">Testnet</span></div><div className="settings-row"><span><b>RPC</b><small>{health.ledger ? `ledger ${health.ledger}` : health.status}</small></span><span className={`sc-badge ${health.ok ? "green" : "red"}`}>{health.status}</span></div><div className="settings-row"><span><b>OpenAI API</b><small>{api.openai ? "server key configured" : "deterministic fallback active"}</small></span><span className={`sc-badge ${api.openai ? "green" : "amber"}`}>{api.openai ? "Live" : "Fallback"}</span></div></div></section><section className="card"><div className="card-header"><span className="card-title">Contracts</span></div><div className="card-body"><div className="settings-row"><span><b>PayGuard Gatekeeper</b><small><a className="td-link" href={contractLink(api.contractId)} target="_blank" rel="noreferrer">{api.contractId || "not configured"}</a></small></span></div><div className="settings-row"><span><b>Attestation verifier</b><small><a className="td-link" href={contractLink(api.verifierContractId)} target="_blank" rel="noreferrer">{api.verifierContractId || "not configured"}</a></small></span></div><div className="settings-row"><span><b>RISC Zero image</b><small>{env.risc0ImageId || "not configured"}</small></span><span className={`sc-badge ${api.realProverConfigured ? "green" : "amber"}`}>{api.realProverConfigured ? "Prover" : "Env"}</span></div><div className="settings-row"><span><b>Token contract</b><small>{api.tokenContractId || "not configured"}</small></span></div></div></section></div>;
 }

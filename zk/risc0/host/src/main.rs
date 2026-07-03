@@ -6,9 +6,33 @@ use sha2::{Digest, Sha256};
 use std::io::{self, Read};
 
 #[derive(Deserialize, Serialize)]
+struct Policy {
+    name: String,
+    #[serde(rename = "maxPerPayment")]
+    max_per_payment: String,
+    #[serde(rename = "dailyLimit")]
+    daily_limit: String,
+    allowlist: Vec<String>,
+    expiry: String,
+    salt: String,
+}
+
+#[derive(Deserialize, Serialize)]
+struct Intent {
+    recipient: String,
+    amount: String,
+    asset: String,
+    category: String,
+    memo: String,
+    rationale: String,
+    #[serde(rename = "riskLevel")]
+    risk_level: String,
+}
+
+#[derive(Deserialize, Serialize)]
 struct ProverInput {
-    policy: serde_json::Value,
-    intent: serde_json::Value,
+    policy: Policy,
+    intent: Intent,
     #[serde(rename = "spentToday")]
     spent_today: String,
     #[serde(rename = "vaultBalance")]
