@@ -40,7 +40,8 @@ COPY zk ./zk
 COPY scripts ./scripts
 COPY tsconfig.base.json ./
 
-RUN npm ci
+RUN npm install
+
 RUN npm run build --workspace @payguard/protocol
 RUN npm run build --workspace @payguard/api
 RUN cd zk/risc0 && cargo build --release -p payguard-risc0-prover
