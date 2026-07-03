@@ -154,6 +154,7 @@ pub struct ReceiptClaim {
 /// For standard successful executions, the system code is
 /// [`SystemExitCode::Halted`] and the user code is zero.
 #[contracttype]
+#[derive(Clone, Debug)]
 pub struct ExitCode {
     /// System-level exit code indicating the execution termination mode.
     system: SystemExitCode,
@@ -251,6 +252,16 @@ impl Output {
 }
 
 impl ReceiptClaim {
+    pub fn get_fields(&self) -> (BytesN<32>, BytesN<32>, ExitCode, BytesN<32>, BytesN<32>) {
+        (
+            self.pre_state_digest.clone(),
+            self.post_state_digest.clone(),
+            self.exit_code.clone(),
+            self.input.clone(),
+            self.output.clone(),
+        )
+    }
+
     /// Fixed post-state digest for a halted execution.
     ///
     /// This is a protocol constant used in standard successful receipt claims.

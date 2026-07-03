@@ -88,6 +88,8 @@ struct ApiOutput {
     receipt_journal_digest: String,
     #[serde(rename = "claimDigest")]
     claim_digest: String,
+    #[serde(rename = "claimJson")]
+    claim_json: String,
     #[serde(rename = "imageId")]
     image_id: String,
     #[serde(rename = "sealHex")]
@@ -124,6 +126,7 @@ fn main() -> Result<()> {
     let contract_journal_digest = hex::encode(&journal_bytes);
     let receipt_journal_digest = hex::encode(Sha256::digest(&journal_bytes));
     let claim_digest = hex::encode(receipt.claim().unwrap().digest());
+    let claim_json = serde_json::to_string(&receipt.claim().unwrap()).unwrap_or_default();
     let out = ApiOutput {
         approved: input.execution_context.approved,
         violation: input.execution_context.violation,
@@ -133,6 +136,7 @@ fn main() -> Result<()> {
         contract_journal_digest,
         receipt_journal_digest,
         claim_digest,
+        claim_json,
         image_id: hex::encode(bytemuck_words(PAYGUARD_RISC0_GUEST_ID)),
         seal_hex: hex::encode(seal),
         receipt_journal_hex: hex::encode(journal_bytes),

@@ -115,3 +115,28 @@ fn bench_receipt_claim_digest() {
     // Print results
     print_budget(&env, "ReceiptClaim::digest()");
 }
+
+#[test]
+fn test_real_claim_digest() {
+    let env = Env::default();
+    const IMAGE_ID: [u8; 32] = [0xb0, 0xc2, 0x6f, 0x9b, 0xf9, 0xa8, 0x87, 0x38, 0x9b, 0x80, 0x04, 0xd1, 0xf1, 0x05, 0x52, 0x96, 0x41, 0xb1, 0x01, 0x40, 0xad, 0x42, 0xed, 0x0c, 0xbf, 0xb6, 0xfc, 0xb7, 0xee, 0x51, 0xe4, 0x61];
+    const JOURNAL_DIGEST: [u8; 32] = [0x16, 0x9c, 0x55, 0x9b, 0x92, 0xd0, 0xad, 0x44, 0xe2, 0x7c, 0xd0, 0xec, 0x93, 0x1f, 0x5a, 0xdc, 0xa5, 0xab, 0x59, 0x59, 0x1c, 0x76, 0x91, 0xc8, 0x61, 0x36, 0x1b, 0xca, 0xd9, 0x22, 0x85, 0x95];
+
+    let image_id = BytesN::from_array(&env, &IMAGE_ID);
+    let journal_digest = BytesN::from_array(&env, &JOURNAL_DIGEST);
+
+    let claim = risc0_interface::ReceiptClaim::new(&env, image_id, journal_digest);
+    let digest = claim.digest(&env);
+
+    let (pre_state, post_state, exit_code, input, output) = claim.get_fields();
+    let arr = digest.to_array();
+    let mut s = std::string::String::new();
+    use std::fmt::Write;
+    writeln!(&mut s, "pre_state_digest: {}", hex::encode(pre_state.to_array())).unwrap();
+    writeln!(&mut s, "post_state_digest: {}", hex::encode(post_state.to_array())).unwrap();
+    writeln!(&mut s, "exit_code: {:?}", exit_code).unwrap();
+    writeln!(&mut s, "input: {}", hex::encode(input.to_array())).unwrap();
+    writeln!(&mut s, "output: {}", hex::encode(output.to_array())).unwrap();
+    writeln!(&mut s, "digest: {}", hex::encode(arr)).unwrap();
+    std::fs::write("temp_claim_digest.txt", s).unwrap();
+}

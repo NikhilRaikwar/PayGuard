@@ -65,6 +65,7 @@ type ProverOutput = {
   contractJournalDigest?: string;
   receiptJournalDigest?: string;
   claimDigest?: string;
+  claimJson?: string;
   imageId: string;
   sealHex: string;
   receiptJournalHex?: string;
@@ -288,6 +289,7 @@ async function runProofJob(
         receiptJournalDigest: prover?.receiptJournalDigest ?? receiptJournalDigest,
         journalDigest: prover?.journalDigest ?? receiptJournalDigest,
         claimDigest: prover?.claimDigest,
+        claimJson: prover?.claimJson,
         mode: prover?.mode ?? "dev-policy-evaluator",
         sealHex: prover?.sealHex ?? "dev-only-no-seal",
         imageId: prover?.imageId ?? process.env.PAYGUARD_RISC0_IMAGE_ID ?? "",
