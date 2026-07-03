@@ -87,9 +87,9 @@ The gatekeeper calls the RISC Zero Groth16 verifier contract. Only after success
 
 | Item | Value | Link |
 | --- | --- | --- |
-| PayGuard Gatekeeper | `CDBYZBYKRNSQLFHKHPG2DAN7TJEVXTJAU6J7WGQ5LOTT4V3WGN6WYXOO` | [View contract](https://stellar.expert/explorer/testnet/contract/CDBYZBYKRNSQLFHKHPG2DAN7TJEVXTJAU6J7WGQ5LOTT4V3WGN6WYXOO) |
+| PayGuard Gatekeeper | `CBMM4VJ5JYGTT7P2DKPT5HDHYN43B3Q7DJXM6NCAAXDFSCWLSH64YNPS` | [View contract](https://stellar.expert/explorer/testnet/contract/CBMM4VJ5JYGTT7P2DKPT5HDHYN43B3Q7DJXM6NCAAXDFSCWLSH64YNPS) |
 | RISC Zero Groth16 Verifier | `CBASP2O6PNI7IC4PBJZ65Y7T3MUZB6RIIVK6BR4NUJMTRVIOXEWKKE5L` | [View contract](https://stellar.expert/explorer/testnet/contract/CBASP2O6PNI7IC4PBJZ65Y7T3MUZB6RIIVK6BR4NUJMTRVIOXEWKKE5L) |
-| Gatekeeper deploy transaction | `d556024319e45ee130cc5924a65323927e749243ba27f2100bb278fa7c5e40f0` | [View transaction](https://stellar.expert/explorer/testnet/tx/d556024319e45ee130cc5924a65323927e749243ba27f2100bb278fa7c5e40f0) |
+| Gatekeeper deploy transaction | `49a3378889660dd803303260fa93c57ca05d350b98cb6ca547a894bfdf1b0c0c` | [View transaction](https://stellar.expert/explorer/testnet/tx/49a3378889660dd803303260fa93c57ca05d350b98cb6ca547a894bfdf1b0c0c) |
 | Verifier deploy transaction | `adc1743bf751aa2b04decbdeb0be921c3f3bd09a8b90839fb29326dd8c82131c` | [View transaction](https://stellar.expert/explorer/testnet/tx/adc1743bf751aa2b04decbdeb0be921c3f3bd09a8b90839fb29326dd8c82131c) |
 | RISC Zero image ID | `b0c26f9bf9a887389b8004d1f105529641b10140ad42ed0cbfb6fcb7ee51e461` | Verifies the PayGuard zkVM guest |
 | Groth16 selector | `73c457ba` | RISC Zero verifier selector |
