@@ -46,6 +46,7 @@ COPY services ./services
 COPY packages ./packages
 COPY zk ./zk
 COPY scripts ./scripts
+RUN sed -i 's/\r$//' scripts/*.sh && chmod +x scripts/*.sh
 COPY tsconfig.base.json ./
 
 RUN npm install -g npm@latest
