@@ -1,173 +1,184 @@
-# PayGuard Agent
+# 🛡️ PayGuard Agent — ZK-Enforced AI Agent Payments on Stellar
 
-## ZK-Enforced AI Agent Payments on Stellar
+> AI agents can propose payments. PayGuard makes them prove policy compliance before funds can move.
 
-AI agents can propose payments. PayGuard makes them prove policy compliance before funds can move.
+PayGuard Agent is a privacy-preserving payment control layer for AI agents on Stellar. Users define private spending rules, register only a policy hash on-chain, and require a RISC Zero Groth16 proof before a Soroban gatekeeper contract can approve a payment or record a denial.
 
-PayGuard Agent is a privacy-preserving payment control layer for AI agents on Stellar. A user defines private spending rules, registers only a policy hash on Stellar, and requires a RISC Zero Groth16 proof before the Soroban gatekeeper contract can approve a payment or record a denial.
+## 🎯 What We Built
 
-## Submission Summary
+PayGuard turns AI-agent payments into a proof-gated workflow:
 
-| Field | Details |
-| --- | --- |
-| Hackathon | Stellar Hacks: Real-World ZK |
-| Track fit | Real ZK on Stellar, agentic payments, Soroban smart contracts |
-| Chain | Stellar testnet |
-| ZK system | RISC Zero zkVM, Groth16 proof, BN254 verifier |
-| Smart contracts | PayGuard gatekeeper and RISC Zero Groth16 verifier |
-| Backend | Hugging Face Spaces Docker API |
-| Frontend | React/Vite dashboard |
-| Wallet | Freighter and Stellar Wallets Kit |
+1. A user connects a Stellar testnet wallet.
+2. The user creates private payment rules: max amount, daily budget, allowed recipients, expiry, and salt.
+3. An AI agent converts a natural-language request into a structured payment intent.
+4. RISC Zero proves the policy decision without exposing the private policy.
+5. A Soroban gatekeeper calls the deployed RISC Zero Groth16 verifier.
+6. If the proof is valid, the contract approves the payment or records a verified denial.
+7. If the proof is wrong or missing, no state change happens.
 
-## Live Links
+## 🌟 Why It Matters
 
-- GitHub: `https://github.com/NikhilRaikwar/PayGuard`
-- Hugging Face API Space: `https://huggingface.co/spaces/NikhilRaikwar/payguard-api`
-- API health: `https://nikhilraikwar-payguard-api.hf.space/v1/health`
-- API config: `https://nikhilraikwar-payguard-api.hf.space/v1/config`
-- Gatekeeper contract: `CDKNJSCK3DUCBJBTEFIYCGNZINAEKFBR24WNUVHCLCPUZJEBHDGLQCUK`
-- RISC Zero verifier contract: `CAHYIV4H2AWIXW5OQZO5EK4VOKLROLNGMB3AGJBR46XC63JKB3VM5CO5`
+AI agents are starting to control payment flows, but most systems still rely on server-side trust. PayGuard replaces that trust with a verifiable ZK boundary.
 
-## What It Does
+For a DAO, startup, or ops team, this means an AI agent can help with routine payments while private rules stay private and enforcement happens on Stellar.
 
-PayGuard lets a user create a private payment policy for an AI agent:
+## 🔐 Why This Is Real ZK
 
-- Maximum amount per payment
+ZK is not a demo badge in PayGuard. It is the authorization gate.
+
+- Private policy values are not posted on-chain.
+- The RISC Zero guest evaluates the payment against those private values.
+- The public journal binds the policy, payment, nonce, network, executor, and result.
+- The Soroban gatekeeper calls the RISC Zero Groth16 verifier before updating payment state.
+- Wrong proof, wrong image ID, wrong journal digest, wrong nonce, or wrong executor means no payment execution.
+
+## ✅ Real-World ZK Track Fit
+
+PayGuard directly targets the Stellar Hacks: Real-World ZK challenge. It turns Stellar's ZK primitives into a finished agentic payments product.
+
+The proof is the line between “the agent suggested this payment” and “the payment is allowed to execute.”
+
+## 🔄 Product Flow
+
+**Step 1 — Create policy**
+
+The user defines private payment rules:
+
+- Maximum payment amount
 - Daily spending limit
 - Recipient allowlist
 - Policy expiry
-- Private salt for policy commitment
+- Private salt
 
-The AI agent can parse a natural language payment request, but it cannot authorize payment by itself. The payment is turned into a structured intent, evaluated inside the RISC Zero guest, and bound to a Soroban journal. The gatekeeper contract verifies the proof boundary before recording approval, denial, spend, nonce, and vault balance changes.
+Only the policy hash is registered on Stellar.
 
-## Why This Is Real ZK
+**Step 2 — Ask the agent**
 
-ZK is not decorative in PayGuard. It is the authorization gate.
+The user types a request like:
 
-1. Private rules are kept off-chain.
-2. The RISC Zero guest evaluates the payment against those private rules.
-3. The public journal binds the policy, payment, nonce, network, executor, and result.
-4. The Soroban gatekeeper calls the RISC Zero Groth16 verifier before any state transition.
-5. Invalid proof, wrong image ID, wrong journal digest, wrong nonce, or wrong executor means no payment execution.
-
-## System Flow
-
-```mermaid
-flowchart LR
-  classDef user fill:#FBF0CC,stroke:#D4A832,color:#12100C
-  classDef app fill:#E4F3EC,stroke:#1A6E42,color:#12100C
-  classDef zk fill:#ECEBFF,stroke:#7C72E5,color:#12100C
-  classDef chain fill:#FAECEB,stroke:#B83228,color:#12100C
-  classDef result fill:#EEF2FF,stroke:#334155,color:#12100C
-
-  U["User wallet"]:::user --> W["PayGuard dashboard"]:::app
-  W --> A["AI payment intent"]:::app
-  A --> P["Private policy witness"]:::zk
-  P --> R0["RISC Zero zkVM guest"]:::zk
-  R0 --> G16["Groth16 seal and journal digest"]:::zk
-  G16 --> GK["Soroban gatekeeper"]:::chain
-  GK --> VF["RISC Zero Groth16 verifier"]:::chain
-  VF --> GK
-  GK --> OK["Approved transfer"]:::result
-  GK --> NO["Verified denial"]:::result
+```text
+Pay Vendor A 30 USDC for API usage.
 ```
 
-## On-Chain Verification Boundary
+The backend parses this into a structured payment intent.
 
-```mermaid
-flowchart TB
-  classDef private fill:#FEF3C7,stroke:#D97706,color:#111827
-  classDef public fill:#DBEAFE,stroke:#2563EB,color:#111827
-  classDef contract fill:#FEE2E2,stroke:#DC2626,color:#111827
+**Step 3 — Generate proof**
 
-  subgraph OffChain["Off-chain proof generation"]
-    Policy["Private policy rules"]:::private
-    Intent["Payment intent"]:::private
-    Guest["PayGuard RISC Zero guest"]:::private
-    Proof["Groth16 proof seal"]:::public
-    Journal["Gatekeeper journal digest"]:::public
-    Policy --> Guest
-    Intent --> Guest
-    Guest --> Proof
-    Guest --> Journal
-  end
+The RISC Zero guest evaluates the private policy against the payment intent and commits the PayGuard gatekeeper journal digest.
 
-  subgraph Stellar["Stellar testnet"]
-    Gatekeeper["PayGuard gatekeeper"]:::contract
-    Verifier["RISC Zero Groth16 verifier"]:::contract
-    State["Policy state and proof log"]:::public
-    Gatekeeper --> Verifier
-    Verifier --> Gatekeeper
-    Gatekeeper --> State
-  end
+**Step 4 — Submit to Stellar**
 
-  Proof --> Gatekeeper
-  Journal --> Gatekeeper
+The dashboard submits the proof payload through the connected wallet.
+
+**Step 5 — Enforce on-chain**
+
+The gatekeeper calls the RISC Zero Groth16 verifier contract. Only after successful verification can the gatekeeper update nonce, spend, vault balance, approval status, or denial status.
+
+## 🧪 What Judges Can Verify
+
+- The gatekeeper contract is live on Stellar testnet.
+- The RISC Zero Groth16 verifier contract is live on Stellar testnet.
+- The gatekeeper contract calls the verifier before state changes.
+- The RISC Zero guest contains the private policy evaluation logic.
+- The API has a real prover boundary and proof-job lifecycle.
+- The UI submits proof-bound execution through the wallet.
+
+## ⛓️ Stellar Testnet Deployment
+
+**PayGuard Gatekeeper**
+
+```text
+CDKNJSCK3DUCBJBTEFIYCGNZINAEKFBR24WNUVHCLCPUZJEBHDGLQCUK
 ```
 
-## What Judges Should Check
+View:
 
-| Check | Where |
-| --- | --- |
-| ZK verifier contract is live | Stellar Expert verifier contract link |
-| Gatekeeper uses verifier boundary | `contracts/payguard_gatekeeper/src/lib.rs` |
-| RISC Zero guest evaluates policy | `zk/risc0/methods/guest/src/main.rs` |
-| Host creates Groth16 payload | `zk/risc0/host/src/main.rs` |
-| API calls real prover boundary | `services/api/src/server.ts` |
-| UI submits wallet-signed execution | `apps/web/src/App.tsx` |
+```text
+https://stellar.expert/explorer/testnet/contract/CDKNJSCK3DUCBJBTEFIYCGNZINAEKFBR24WNUVHCLCPUZJEBHDGLQCUK
+```
 
-## Deployed Stellar Testnet Contracts
+**RISC Zero Groth16 Verifier**
 
-| Component | ID / transaction | Link |
-| --- | --- | --- |
-| PayGuard Gatekeeper | `CDKNJSCK3DUCBJBTEFIYCGNZINAEKFBR24WNUVHCLCPUZJEBHDGLQCUK` | `https://stellar.expert/explorer/testnet/contract/CDKNJSCK3DUCBJBTEFIYCGNZINAEKFBR24WNUVHCLCPUZJEBHDGLQCUK` |
-| RISC Zero Groth16 Verifier | `CAHYIV4H2AWIXW5OQZO5EK4VOKLROLNGMB3AGJBR46XC63JKB3VM5CO5` | `https://stellar.expert/explorer/testnet/contract/CAHYIV4H2AWIXW5OQZO5EK4VOKLROLNGMB3AGJBR46XC63JKB3VM5CO5` |
-| Gatekeeper deploy tx | `4d01e0f970feddea871e0e296f481e42b0f732679c71ef4888aab2aa60bfe32c` | `https://stellar.expert/explorer/testnet/tx/4d01e0f970feddea871e0e296f481e42b0f732679c71ef4888aab2aa60bfe32c` |
-| Verifier deploy tx | `2dbb911ec30bc4d7e6a611ea91b4e5d325af46a6558f6efda2910a356df3e57d` | `https://stellar.expert/explorer/testnet/tx/2dbb911ec30bc4d7e6a611ea91b4e5d325af46a6558f6efda2910a356df3e57d` |
+```text
+CAHYIV4H2AWIXW5OQZO5EK4VOKLROLNGMB3AGJBR46XC63JKB3VM5CO5
+```
 
-RISC Zero image ID:
+View:
+
+```text
+https://stellar.expert/explorer/testnet/contract/CAHYIV4H2AWIXW5OQZO5EK4VOKLROLNGMB3AGJBR46XC63JKB3VM5CO5
+```
+
+**Gatekeeper deploy transaction**
+
+```text
+4d01e0f970feddea871e0e296f481e42b0f732679c71ef4888aab2aa60bfe32c
+```
+
+**Verifier deploy transaction**
+
+```text
+2dbb911ec30bc4d7e6a611ea91b4e5d325af46a6558f6efda2910a356df3e57d
+```
+
+**RISC Zero image ID**
 
 ```text
 b0c26f9bf9a887389b8004d1f105529641b10140ad42ed0cbfb6fcb7ee51e461
 ```
 
-RISC Zero Groth16 selector:
+**Groth16 selector**
 
 ```text
 73c457ba
 ```
 
-## Privacy Boundary
+## 🌐 Live Backend
 
-| Private | Public |
-| --- | --- |
-| Max payment amount | Policy hash |
-| Daily spend limit | Contract IDs |
-| Recipient allowlist | RISC Zero image ID |
-| Policy salt | Proof seal |
-| Full policy witness | Journal digest |
-| User intent details before proving | Approved or denied decision event |
+The PayGuard API is deployed as a Hugging Face Docker Space:
 
-## Demo Path for Judges
+```text
+https://huggingface.co/spaces/NikhilRaikwar/payguard-api
+```
 
-1. Open the dashboard.
-2. Connect a Stellar testnet wallet.
-3. Create a policy with a max amount, daily budget, allowlist, expiry, and vault amount.
-4. Ask the agent to pay an allowlisted recipient under the max amount.
-5. Generate the proof and submit the wallet transaction.
-6. Try an over-limit or unlisted recipient.
-7. Confirm the blocked decision is recorded instead of moving funds.
+Health:
 
-## Why It Matters
+```text
+https://nikhilraikwar-payguard-api.hf.space/v1/health
+```
 
-Autonomous agents need payment limits, but simple server-side checks are not enough. PayGuard gives teams a way to delegate routine payments while keeping policy values private and making enforcement verifiable on Stellar.
+Config:
 
-The result is a practical Real-World ZK product: private policy evaluation off-chain, public verifier enforcement on-chain, and an agent payment flow that fails closed when proof is missing or invalid.
+```text
+https://nikhilraikwar-payguard-api.hf.space/v1/config
+```
 
-## Built With
+## 🔒 Privacy Boundary
 
-- Stellar testnet and Soroban smart contracts
-- RISC Zero zkVM and Groth16 receipts
+Private:
+
+- Max payment amount
+- Daily spend limit
+- Recipient allowlist
+- Policy expiry
+- Policy salt
+- Full private policy witness
+
+Public:
+
+- Policy hash
+- Contract IDs
+- RISC Zero image ID
+- Proof seal
+- Journal digest
+- Approved or denied decision event
+
+## 🧱 Tech Stack
+
+- Stellar testnet
+- Soroban smart contracts in Rust
+- RISC Zero zkVM
+- Groth16 proof verification
 - Nethermind-style Stellar RISC Zero verifier pattern
 - React, Vite, TypeScript
 - Node.js and Express
@@ -175,6 +186,17 @@ The result is a practical Real-World ZK product: private policy evaluation off-c
 - Freighter and Stellar Wallets Kit
 - OpenAI intent parsing
 
-## Hackathon Fit
+## 📁 Code Pointers
 
-PayGuard directly targets the Real-World ZK prompt: it turns Stellar's ZK primitives into a finished agentic payments product. The proof is not an optional badge. It is the line between a proposed payment and an executable payment.
+- `contracts/payguard_gatekeeper/src/lib.rs` — proof-gated payment execution
+- `contracts/payguard_risc0_verifier/src/lib.rs` — RISC Zero Groth16 verifier contract
+- `zk/risc0/methods/guest/src/main.rs` — private policy evaluation in the zkVM
+- `zk/risc0/host/src/main.rs` — Groth16 proof payload generation
+- `services/api/src/server.ts` — OpenAI intent API and proof-job lifecycle
+- `apps/web/src/App.tsx` — dashboard, wallet flow, and proof submission
+
+## 🏁 Final Judge Takeaway
+
+PayGuard is a finished Real-World ZK product for agentic payments on Stellar. It keeps policy rules private, proves compliance with RISC Zero, verifies the proof through a Soroban verifier contract, and uses that proof as the condition for payment execution.
+
+No valid proof means no payment.
