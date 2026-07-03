@@ -122,6 +122,9 @@ The PayGuard API is deployed as a Docker Space on Hugging Face:
 https://huggingface.co/spaces/NikhilRaikwar/payguard-api
 ```
 
+> [!NOTE]
+> Generating a real RISC Zero Groth16 proof is highly CPU-intensive and takes about 3.5 minutes on a standard CPU. Free Hugging Face Spaces have shared CPU limits that can cause timeouts. For the best demo experience, running the API server and prover locally (which uses the local Rust toolchain) is recommended.
+
 Runtime endpoints:
 
 ```text

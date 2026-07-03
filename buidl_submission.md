@@ -87,16 +87,19 @@ The gatekeeper calls the RISC Zero Groth16 verifier contract. Only after success
 
 | Item | Value | Link |
 | --- | --- | --- |
-| PayGuard Gatekeeper | `CDKNJSCK3DUCBJBTEFIYCGNZINAEKFBR24WNUVHCLCPUZJEBHDGLQCUK` | [View contract](https://stellar.expert/explorer/testnet/contract/CDKNJSCK3DUCBJBTEFIYCGNZINAEKFBR24WNUVHCLCPUZJEBHDGLQCUK) |
-| RISC Zero Groth16 Verifier | `CAHYIV4H2AWIXW5OQZO5EK4VOKLROLNGMB3AGJBR46XC63JKB3VM5CO5` | [View contract](https://stellar.expert/explorer/testnet/contract/CAHYIV4H2AWIXW5OQZO5EK4VOKLROLNGMB3AGJBR46XC63JKB3VM5CO5) |
-| Gatekeeper deploy transaction | `4d01e0f970feddea871e0e296f481e42b0f732679c71ef4888aab2aa60bfe32c` | [View transaction](https://stellar.expert/explorer/testnet/tx/4d01e0f970feddea871e0e296f481e42b0f732679c71ef4888aab2aa60bfe32c) |
-| Verifier deploy transaction | `2dbb911ec30bc4d7e6a611ea91b4e5d325af46a6558f6efda2910a356df3e57d` | [View transaction](https://stellar.expert/explorer/testnet/tx/2dbb911ec30bc4d7e6a611ea91b4e5d325af46a6558f6efda2910a356df3e57d) |
+| PayGuard Gatekeeper | `CDBYZBYKRNSQLFHKHPG2DAN7TJEVXTJAU6J7WGQ5LOTT4V3WGN6WYXOO` | [View contract](https://stellar.expert/explorer/testnet/contract/CDBYZBYKRNSQLFHKHPG2DAN7TJEVXTJAU6J7WGQ5LOTT4V3WGN6WYXOO) |
+| RISC Zero Groth16 Verifier | `CBASP2O6PNI7IC4PBJZ65Y7T3MUZB6RIIVK6BR4NUJMTRVIOXEWKKE5L` | [View contract](https://stellar.expert/explorer/testnet/contract/CBASP2O6PNI7IC4PBJZ65Y7T3MUZB6RIIVK6BR4NUJMTRVIOXEWKKE5L) |
+| Gatekeeper deploy transaction | `d556024319e45ee130cc5924a65323927e749243ba27f2100bb278fa7c5e40f0` | [View transaction](https://stellar.expert/explorer/testnet/tx/d556024319e45ee130cc5924a65323927e749243ba27f2100bb278fa7c5e40f0) |
+| Verifier deploy transaction | `adc1743bf751aa2b04decbdeb0be921c3f3bd09a8b90839fb29326dd8c82131c` | [View transaction](https://stellar.expert/explorer/testnet/tx/adc1743bf751aa2b04decbdeb0be921c3f3bd09a8b90839fb29326dd8c82131c) |
 | RISC Zero image ID | `b0c26f9bf9a887389b8004d1f105529641b10140ad42ed0cbfb6fcb7ee51e461` | Verifies the PayGuard zkVM guest |
 | Groth16 selector | `73c457ba` | RISC Zero verifier selector |
 
 ## 🌐 Live Backend
 
 The PayGuard API is deployed as a Hugging Face Docker Space.
+
+> [!NOTE]
+> Generating a real RISC Zero Groth16 proof is highly CPU-intensive and takes about 3.5 minutes on a standard CPU. Free Hugging Face Spaces have shared CPU limits that can cause timeouts. For the best demo experience, running the API server and prover locally (which uses the local Rust toolchain) is recommended.
 
 | Endpoint | Link |
 | --- | --- |

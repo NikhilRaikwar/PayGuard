@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use payguard_risc0_methods::{PAYGUARD_RISC0_GUEST_ELF, PAYGUARD_RISC0_GUEST_ID};
 use risc0_ethereum_contracts::encode_seal;
-use risc0_zkvm::{default_prover, ExecutorEnv, ProverOpts};
+use risc0_zkvm::{default_prover, ExecutorEnv, ProverOpts, sha::Digestible};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::io::{self, Read};
@@ -86,6 +86,8 @@ struct ApiOutput {
     contract_journal_digest: String,
     #[serde(rename = "receiptJournalDigest")]
     receipt_journal_digest: String,
+    #[serde(rename = "claimDigest")]
+    claim_digest: String,
     #[serde(rename = "imageId")]
     image_id: String,
     #[serde(rename = "sealHex")]
@@ -121,6 +123,7 @@ fn main() -> Result<()> {
     let seal = encode_seal(&receipt).context("failed to encode Groth16 seal")?;
     let contract_journal_digest = hex::encode(&journal_bytes);
     let receipt_journal_digest = hex::encode(Sha256::digest(&journal_bytes));
+    let claim_digest = hex::encode(receipt.claim().unwrap().digest());
     let out = ApiOutput {
         approved: input.execution_context.approved,
         violation: input.execution_context.violation,
@@ -129,6 +132,7 @@ fn main() -> Result<()> {
         journal_digest: receipt_journal_digest.clone(),
         contract_journal_digest,
         receipt_journal_digest,
+        claim_digest,
         image_id: hex::encode(bytemuck_words(PAYGUARD_RISC0_GUEST_ID)),
         seal_hex: hex::encode(seal),
         receipt_journal_hex: hex::encode(journal_bytes),

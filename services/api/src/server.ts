@@ -64,6 +64,7 @@ type ProverOutput = {
   journalDigest: string;
   contractJournalDigest?: string;
   receiptJournalDigest?: string;
+  claimDigest?: string;
   imageId: string;
   sealHex: string;
   receiptJournalHex?: string;
@@ -274,6 +275,7 @@ async function runProofJob(
       : null;
 
     if (prover) {
+      console.log("[DEBUG API] Prover output:", prover);
       assertSameDecision(decision, prover);
     }
 
@@ -285,6 +287,7 @@ async function runProofJob(
         contractJournalDigest: prover?.contractJournalDigest ?? contractJournalDigest,
         receiptJournalDigest: prover?.receiptJournalDigest ?? receiptJournalDigest,
         journalDigest: prover?.journalDigest ?? receiptJournalDigest,
+        claimDigest: prover?.claimDigest,
         mode: prover?.mode ?? "dev-policy-evaluator",
         sealHex: prover?.sealHex ?? "dev-only-no-seal",
         imageId: prover?.imageId ?? process.env.PAYGUARD_RISC0_IMAGE_ID ?? "",
