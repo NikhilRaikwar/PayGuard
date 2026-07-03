@@ -268,7 +268,17 @@ export function App() {
       setActivePolicy(null);
       setVaultBalance("0");
     } catch (error) {
-      notify(error instanceof Error ? error.message : "Revocation failed", "error");
+      console.error(error);
+      const msg = error instanceof Error ? error.message : String(error);
+      const isNotFound = msg.includes("Error(Contract, #1)") || msg.includes("PolicyNotFound");
+      if (isNotFound) {
+        notify("Stale policy not found on-chain; cleared locally", "warn");
+        localStorage.removeItem("payguard.activePolicy");
+        setActivePolicy(null);
+        setVaultBalance("0");
+      } else {
+        notify(msg, "error");
+      }
     }
   }
 
@@ -1281,8 +1291,8 @@ function AgentConsole({
       }).then((r) => r.json());
       setStep(3);
       let finalJob = job;
-      for (let i = 0; i < 10; i++) {
-        await new Promise((resolve) => setTimeout(resolve, 500));
+      for (let i = 0; i < 300; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
         finalJob = await fetch(`${env.apiUrl}/v1/proofs/${job.id}`).then((r) => r.json());
         if (finalJob.status === "complete" || finalJob.status === "failed") break;
       }

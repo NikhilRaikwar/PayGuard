@@ -1,0 +1,38 @@
+{
+  "policy": {
+    "name": "Agent ops policy",
+    "maxPerPayment": "50",
+    "dailyLimit": "200",
+    "allowlist": ["GD6LDTHAX2423TVKWP2HCLMRN24B3XOQ4YPSFQWTB27F7NZJIVIZ453A"],
+    "expiry": "2026-07-15",
+    "salt": "payguard-demo-salt"
+  },
+  "intent": {
+    "recipient": "GD6LDTHAX2423TVKWP2HCLMRN24B3XOQ4YPSFQWTB27F7NZJIVIZ453A",
+    "amount": "30",
+    "asset": "USDC",
+    "category": "api",
+    "memo": "test",
+    "rationale": "test",
+    "riskLevel": "low"
+  },
+  "spentToday": "0",
+  "vaultBalance": "1000",
+  "proofDate": "2026-07-03",
+  "executionContext": {
+    "networkHash": "b0c26f9bf9a887389b8004d1f105529641b10140ad42ed0cbfb6fcb7ee51e461",
+    "policyId": "f4797a6586d9cb5f7e893b191f7e229c274633bb7ff4829fc749f8d96f9010a8",
+    "policyHash": "554ea46e622200b2c5970921642d6b23ee98171d9a795b0db18dab63e3621745",
+    "amount": "300000000",
+    "dayIndex": "20638",
+    "spentBefore": "0",
+    "spentAfter": "300000000",
+    "vaultBefore": "10000000000",
+    "vaultAfter": "9700000000",
+    "nonce": "0",
+    "proofTimestamp": "1783084800",
+    "approved": true,
+    "violation": 0,
+    "intentDigest": "f4797a6586d9cb5f7e893b191f7e229c274633bb7ff4829fc749f8d96f9010a8"
+  }
+}

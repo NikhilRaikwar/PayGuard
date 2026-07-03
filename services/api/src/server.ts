@@ -350,8 +350,15 @@ async function runExternalProver(command: string, input: unknown): Promise<Prove
 function resolveProverCommand(command: string): string {
   const trimmed = command.trim();
   if (!trimmed) return trimmed;
-  if (isAbsolute(trimmed) || trimmed.includes(" ")) return trimmed;
-  return resolve(rootDir, trimmed);
+  if (trimmed.endsWith(".sh") && !isAbsolute(trimmed)) {
+    return `bash ./${trimmed}`;
+  }
+  const resolved = isAbsolute(trimmed) || trimmed.includes(" ")
+    ? trimmed
+    : resolve(rootDir, trimmed);
+  return resolved.includes(" ") && !resolved.startsWith('"')
+    ? `"${resolved}"`
+    : resolved;
 }
 
 function assertSameDecision(expected: Awaited<ReturnType<typeof evaluatePolicy>>, actual: ProverOutput) {

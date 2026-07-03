@@ -97,10 +97,10 @@ flowchart TB
 
 | Component | ID / transaction | Link |
 | --- | --- | --- |
-| PayGuard Gatekeeper | `CDKNJSCK3DUCBJBTEFIYCGNZINAEKFBR24WNUVHCLCPUZJEBHDGLQCUK` | [Stellar Expert](https://stellar.expert/explorer/testnet/contract/CDKNJSCK3DUCBJBTEFIYCGNZINAEKFBR24WNUVHCLCPUZJEBHDGLQCUK) |
-| RISC Zero Groth16 Verifier | `CAHYIV4H2AWIXW5OQZO5EK4VOKLROLNGMB3AGJBR46XC63JKB3VM5CO5` | [Stellar Expert](https://stellar.expert/explorer/testnet/contract/CAHYIV4H2AWIXW5OQZO5EK4VOKLROLNGMB3AGJBR46XC63JKB3VM5CO5) |
-| Gatekeeper deploy tx | `4d01e0f970feddea871e0e296f481e42b0f732679c71ef4888aab2aa60bfe32c` | [Stellar Expert](https://stellar.expert/explorer/testnet/tx/4d01e0f970feddea871e0e296f481e42b0f732679c71ef4888aab2aa60bfe32c) |
-| Verifier deploy tx | `2dbb911ec30bc4d7e6a611ea91b4e5d325af46a6558f6efda2910a356df3e57d` | [Stellar Expert](https://stellar.expert/explorer/testnet/tx/2dbb911ec30bc4d7e6a611ea91b4e5d325af46a6558f6efda2910a356df3e57d) |
+| PayGuard Gatekeeper | `CDBYZBYKRNSQLFHKHPG2DAN7TJEVXTJAU6J7WGQ5LOTT4V3WGN6WYXOO` | [Stellar Expert](https://stellar.expert/explorer/testnet/contract/CDBYZBYKRNSQLFHKHPG2DAN7TJEVXTJAU6J7WGQ5LOTT4V3WGN6WYXOO) |
+| RISC Zero Groth16 Verifier | `CBASP2O6PNI7IC4PBJZ65Y7T3MUZB6RIIVK6BR4NUJMTRVIOXEWKKE5L` | [Stellar Expert](https://stellar.expert/explorer/testnet/contract/CBASP2O6PNI7IC4PBJZ65Y7T3MUZB6RIIVK6BR4NUJMTRVIOXEWKKE5L) |
+| Gatekeeper deploy tx | `d556024319e45ee130cc5924a65323927e749243ba27f2100bb278fa7c5e40f0` | [Stellar Expert](https://stellar.expert/explorer/testnet/tx/d556024319e45ee130cc5924a65323927e749243ba27f2100bb278fa7c5e40f0) |
+| Verifier deploy tx | `adc1743bf751aa2b04decbdeb0be921c3f3bd09a8b90839fb29326dd8c82131c` | [Stellar Expert](https://stellar.expert/explorer/testnet/tx/adc1743bf751aa2b04decbdeb0be921c3f3bd09a8b90839fb29326dd8c82131c) |
 
 RISC Zero image ID:
 

@@ -23,6 +23,7 @@
     "test": "npm run typecheck && cargo test --workspace"
   },
   "devDependencies": {
+    "@esbuild/linux-x64": "^0.28.1",
     "typescript": "^5.5.4"
   }
 }

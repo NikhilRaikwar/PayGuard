@@ -234,10 +234,11 @@ fn main() {
     let vk_digest = compute_vk_digest(&vk);
     let selector = compute_selector(&params.control_root, &params.bn254_control_id, vk_digest);
     let (control_root_0, control_root_1) = compute_control_roots(&params.control_root);
-    let bn254_control_id: [u8; 32] = hex::decode(params.bn254_control_id.clone())
+    let mut bn254_control_id: [u8; 32] = hex::decode(params.bn254_control_id.clone())
         .expect("Invalid hex string for bn254_control_id")
         .try_into()
         .expect("bn254_control_id must be exactly 32 bytes");
+    bn254_control_id.reverse();
 
     // Print key verifier parameters during build
     println!("cargo:warning===========================================");

@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "@creit.tech/stellar-wallets-kit": "^2.5.0",
-    "@payguard/protocol": "file:../../packages/protocol",
+    "@payguard/protocol": "workspace:*",
     "@stellar/freighter-api": "^4.1.0",
     "@stellar/stellar-sdk": "^16.0.1",
     "buffer": "^6.0.3",

@@ -4,8 +4,6 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT/zk/risc0"
 
-source "${HOME}/.bashrc" >/dev/null 2>&1 || true
-
 echo "PayGuard prover starting in $(pwd)" >&2
 echo "PAYGUARD_REPO_ROOT=${PAYGUARD_REPO_ROOT:-$ROOT}" >&2
 
