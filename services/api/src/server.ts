@@ -336,6 +336,7 @@ async function runExternalProver(command: string, input: unknown): Promise<Prove
         reject(new Error(`Invalid RISC Zero prover output: ${error instanceof Error ? error.message : "parse failed"}`));
       }
     });
+    child.stdin.on("error", () => {});
     child.stdin.end(JSON.stringify(input));
   });
 }
