@@ -50,7 +50,10 @@ COPY tsconfig.base.json ./
 
 RUN npm install -g npm@latest
 
+RUN rm -f package-lock.json
+
 RUN npm install
+
 
 RUN npm run build --workspace @payguard/protocol
 RUN npm run build --workspace @payguard/api
