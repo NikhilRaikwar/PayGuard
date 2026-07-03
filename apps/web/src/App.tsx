@@ -223,8 +223,10 @@ export function App() {
       const policyId = await computePolicyId(pHash, policy.salt);
       notify(`Policy deployed! ID: ${shortAddress(policyId)}`, "success");
 
-      localStorage.setItem("payguard.activePolicy", JSON.stringify(policy));
-      setActivePolicy(policy);
+      const formattedDate = new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+      const policyWithDate = { ...policy, deployedAt: formattedDate };
+      localStorage.setItem("payguard.activePolicy", JSON.stringify(policyWithDate));
+      setActivePolicy(policyWithDate);
       setVaultBalance(initialVault);
       setSpentToday("0");
       setView("dashboard");
@@ -853,7 +855,7 @@ function Dashboard({
             <>
               <div style={{ marginBottom: "14px" }}>
                 <div style={{ fontSize: "14px", fontWeight: "700", marginBottom: "2px" }}>{policy.name}</div>
-                <div style={{ fontSize: "12px", color: "var(--ink4)", fontFamily: "var(--mono)", marginBottom: "14px" }}>Deployed Jun 27 · Expires {policy.expiry}</div>
+                <div style={{ fontSize: "12px", color: "var(--ink4)", fontFamily: "var(--mono)", marginBottom: "14px" }}>Deployed {policy.deployedAt || "Jun 27"} · Expires {policy.expiry}</div>
               </div>
               <div className="rule-row">
                 <span className="rr-dot amber-dot" />
@@ -1381,7 +1383,7 @@ function Policies({
   revokePolicy: () => void;
   vaultBalance: string;
 }) {
-  const isActive = Number(vaultBalance) > 0;
+  const isActive = !!policy;
 
   const handleNewPolicy = () => {
     setPolicy({
@@ -1425,7 +1427,7 @@ function Policies({
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: "14px", fontWeight: "600", color: "var(--ink)", marginBottom: "3px" }}>{policy.name || "Unnamed Policy"}</div>
               <div style={{ fontSize: "12px", color: "var(--ink4)", fontFamily: "var(--mono)", marginBottom: "8px" }}>
-                Deployed Jun 27 · Expires {policy.expiry || "No expiry"}
+                Deployed {policy.deployedAt || "Jun 27"} · Expires {policy.expiry || "No expiry"}
               </div>
               <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
                 <span className={`sc-badge ${isActive ? "green" : "red"}`}>● {isActive ? "Active" : "Inactive"}</span>

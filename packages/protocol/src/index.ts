@@ -11,6 +11,7 @@ export type PolicyDefinition = {
   allowlist: string[];
   expiry: string;
   salt: string;
+  deployedAt?: string;
 };
 
 export type PaymentIntent = {
