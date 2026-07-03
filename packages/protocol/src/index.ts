@@ -82,13 +82,25 @@ export function hexToBytes(hex: string): Uint8Array {
 
 export function canonicalPolicy(policy: PolicyDefinition): string {
   const allowlist = [...new Set(policy.allowlist.map((x) => x.trim()).filter(Boolean))].sort();
+  let maxPerPayment = "0";
+  try {
+    if (policy.maxPerPayment) {
+      maxPerPayment = parseUsdc(policy.maxPerPayment).toString();
+    }
+  } catch {}
+  let dailyLimit = "0";
+  try {
+    if (policy.dailyLimit) {
+      dailyLimit = parseUsdc(policy.dailyLimit).toString();
+    }
+  } catch {}
   return JSON.stringify({
-    name: policy.name.trim(),
-    maxPerPayment: parseUsdc(policy.maxPerPayment).toString(),
-    dailyLimit: parseUsdc(policy.dailyLimit).toString(),
+    name: (policy.name || "").trim(),
+    maxPerPayment,
+    dailyLimit,
     allowlist,
-    expiry: policy.expiry,
-    salt: policy.salt
+    expiry: policy.expiry || "",
+    salt: policy.salt || ""
   });
 }
 
@@ -115,11 +127,16 @@ export async function evaluatePolicy(params: {
 }): Promise<Decision> {
   const policyHash = await hashPolicy(params.policy);
   const intentDigest = await digestIntent(params.intent);
-  const amount = parseUsdc(params.intent.amount);
-  const max = parseUsdc(params.policy.maxPerPayment);
-  const daily = parseUsdc(params.policy.dailyLimit);
-  const spent = parseUsdc(params.spentToday);
-  const vault = parseUsdc(params.vaultBalance);
+  let amount = 0n;
+  try { amount = parseUsdc(params.intent.amount); } catch {}
+  let max = 0n;
+  try { max = parseUsdc(params.policy.maxPerPayment); } catch {}
+  let daily = 0n;
+  try { daily = parseUsdc(params.policy.dailyLimit); } catch {}
+  let spent = 0n;
+  try { spent = parseUsdc(params.spentToday); } catch {}
+  let vault = 0n;
+  try { vault = parseUsdc(params.vaultBalance); } catch {}
   const now = params.now ?? new Date();
   const expiry = new Date(`${params.policy.expiry}T23:59:59Z`);
   let violation = ViolationCode.None;
