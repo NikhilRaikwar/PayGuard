@@ -48,6 +48,8 @@ COPY zk ./zk
 COPY scripts ./scripts
 COPY tsconfig.base.json ./
 
+RUN npm install -g npm@latest
+
 RUN npm install
 
 RUN npm run build --workspace @payguard/protocol
