@@ -114,6 +114,10 @@ export function App() {
   const [spentToday, setSpentToday] = useState("0");
   const [initialVault, setInitialVault] = useState("1000");
 
+  const [showFundModal, setShowFundModal] = useState(false);
+  const [fundAmountInput, setFundAmountInput] = useState("10");
+  const [showRevokeModal, setShowRevokeModal] = useState(false);
+
   async function refreshOnChainState() {
     if (!wallet || !env.contractId || !activePolicy) return;
     try {
@@ -230,8 +234,16 @@ export function App() {
     }
   }
 
-  async function revokePolicy() {
-    if (!window.confirm("Revoke this policy? Soroban will immediately reject all future payments and return vault funds.")) return;
+  function revokePolicy() {
+    if (!wallet) {
+      notify("Please connect your wallet first", "warn");
+      return;
+    }
+    setShowRevokeModal(true);
+  }
+
+  async function executeRevoke() {
+    setShowRevokeModal(false);
     try {
       if (wallet && env.contractId && activePolicy) {
         notify("Revoking policy on-chain...", "info");
@@ -258,15 +270,20 @@ export function App() {
     }
   }
 
-  async function fundPolicy() {
+  function fundPolicy() {
     if (!wallet) {
       notify("Please connect your wallet first", "warn");
       return;
     }
-    const amountStr = window.prompt("Enter amount of USDC to fund policy vault:", "100");
-    if (!amountStr) return;
+    setFundAmountInput("10");
+    setShowFundModal(true);
+  }
+
+  async function executeFunding() {
+    setShowFundModal(false);
+    if (!fundAmountInput) return;
     try {
-      const amountBig = parseUsdc(amountStr);
+      const amountBig = parseUsdc(fundAmountInput);
       if (env.contractId && activePolicy && activePolicyHash) {
         notify("Funding policy on-chain...", "info");
         const policyId = await computePolicyId(activePolicyHash, activePolicy.salt);
@@ -283,8 +300,8 @@ export function App() {
         notify("Vault successfully funded on Soroban", "success");
         await refreshOnChainState();
       } else {
-        setVaultBalance((prev) => String(Number(prev) + Number(amountStr)));
-        notify(`Vault funded locally with ${amountStr} USDC`, "success");
+        setVaultBalance((prev) => String(Number(prev) + Number(fundAmountInput)));
+        notify(`Vault funded locally with ${fundAmountInput} USDC`, "success");
       }
     } catch (error) {
       notify(error instanceof Error ? error.message : "Funding failed", "error");
@@ -396,6 +413,55 @@ export function App() {
         </section>
       </main>
       {toast && <div id="toast" className="show"><span className={`t-icon ${toast.tone}`} /> <span>{toast.message}</span></div>}
+
+      {/* Custom Fund Modal */}
+      {showFundModal && (
+        <div className="modal-overlay">
+          <div className="modal-card">
+            <div className="modal-card-header">
+              <h3>Fund Policy Vault</h3>
+              <button className="modal-close-btn" onClick={() => setShowFundModal(false)}>&times;</button>
+            </div>
+            <div className="modal-card-body">
+              <p>Enter the amount of USDC to deposit from your wallet into the secure contract vault.</p>
+              <div className="modal-input-wrap">
+                <input
+                  type="number"
+                  className="modal-input"
+                  placeholder="10"
+                  value={fundAmountInput}
+                  onChange={(e) => setFundAmountInput(e.target.value)}
+                  autoFocus
+                />
+                <span className="modal-suffix">USDC</span>
+              </div>
+            </div>
+            <div className="modal-card-footer">
+              <button className="btn-cancel" onClick={() => setShowFundModal(false)}>Cancel</button>
+              <button className="btn-confirm" onClick={executeFunding}>Confirm Fund</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Custom Revoke Modal */}
+      {showRevokeModal && (
+        <div className="modal-overlay">
+          <div className="modal-card">
+            <div className="modal-card-header">
+              <h3>Revoke Policy</h3>
+              <button className="modal-close-btn" onClick={() => setShowRevokeModal(false)}>&times;</button>
+            </div>
+            <div className="modal-card-body">
+              <p>Are you sure you want to deactivate and revoke this policy? Soroban will immediately reject all future payments and return all remaining vault funds back to your wallet.</p>
+            </div>
+            <div className="modal-card-footer">
+              <button className="btn-cancel" onClick={() => setShowRevokeModal(false)}>Cancel</button>
+              <button className="btn-danger" onClick={executeRevoke}>Confirm Revoke</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
