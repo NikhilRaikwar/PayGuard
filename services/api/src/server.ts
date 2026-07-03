@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import {
   evaluatePolicy,
+  gatekeeperJournalDigest,
   isLikelyStellarAddress,
   parseUsdc,
   type PaymentIntent,
@@ -58,6 +59,8 @@ type ProverOutput = {
   policyHash: string;
   intentDigest: string;
   journalDigest: string;
+  contractJournalDigest?: string;
+  receiptJournalDigest?: string;
   imageId: string;
   sealHex: string;
   receiptJournalHex?: string;
@@ -65,13 +68,31 @@ type ProverOutput = {
   mode: string;
 };
 
+const executionContextSchema = z.object({
+  networkHash: z.string().regex(/^(0x)?[0-9a-fA-F]{64}$/),
+  policyId: z.string().regex(/^(0x)?[0-9a-fA-F]{64}$/),
+  policyHash: z.string().regex(/^(0x)?[0-9a-fA-F]{64}$/),
+  amount: z.string(),
+  dayIndex: z.string(),
+  spentBefore: z.string(),
+  spentAfter: z.string(),
+  vaultBefore: z.string(),
+  vaultAfter: z.string(),
+  nonce: z.string(),
+  proofTimestamp: z.string(),
+  approved: z.boolean(),
+  violation: z.number().int().min(0),
+  intentDigest: z.string().regex(/^(0x)?[0-9a-fA-F]{64}$/)
+});
+
 app.get("/v1/health", (_req, res) => {
   res.json({
     ok: true,
     service: "payguard-api",
     network: process.env.STELLAR_NETWORK ?? "testnet",
     openai: Boolean(process.env.OPENAI_API_KEY),
-    realProverConfigured: Boolean(process.env.PAYGUARD_REAL_PROVER_CMD)
+    realProverConfigured: Boolean(process.env.PAYGUARD_REAL_PROVER_CMD),
+    verifierMode: process.env.PAYGUARD_VERIFIER_MODE ?? (process.env.PAYGUARD_REAL_PROVER_CMD ? "risc0-groth16-onchain" : "dev-policy-evaluator")
   });
 });
 
@@ -82,7 +103,8 @@ app.get("/v1/config", (_req, res) => {
     contractId: process.env.PAYGUARD_CONTRACT_ID ?? "",
     verifierContractId: process.env.PAYGUARD_VERIFIER_CONTRACT_ID ?? "",
     tokenContractId: process.env.PAYGUARD_TOKEN_CONTRACT_ID ?? "",
-    realProverConfigured: Boolean(process.env.PAYGUARD_REAL_PROVER_CMD)
+    realProverConfigured: Boolean(process.env.PAYGUARD_REAL_PROVER_CMD),
+    verifierMode: process.env.PAYGUARD_VERIFIER_MODE ?? (process.env.PAYGUARD_REAL_PROVER_CMD ? "risc0-groth16-onchain" : "dev-policy-evaluator")
   });
 });
 
@@ -113,7 +135,8 @@ app.post("/v1/proofs", async (req, res) => {
     policy: policySchema,
     intent: intentSchema,
     spentToday: z.string().default("0"),
-    vaultBalance: z.string().default("0")
+    vaultBalance: z.string().default("0"),
+    executionContext: executionContextSchema.optional()
   }).safeParse(req.body);
 
   if (!body.success) return res.status(400).json({ error: body.error.flatten() });
@@ -122,7 +145,7 @@ app.post("/v1/proofs", async (req, res) => {
   proofJobs.set(id, { id, status: "queued", createdAt: new Date().toISOString() });
   res.status(202).json({ id, status: "queued" });
 
-  void runProofJob(id, body.data.policy, body.data.intent, body.data.spentToday, body.data.vaultBalance);
+  void runProofJob(id, body.data.policy, body.data.intent, body.data.spentToday, body.data.vaultBalance, body.data.executionContext);
 });
 
 app.get("/v1/proofs/:jobId", (req, res) => {
@@ -233,15 +256,18 @@ async function runProofJob(
   policy: PolicyDefinition,
   intent: PaymentIntent,
   spentToday: string,
-  vaultBalance: string
+  vaultBalance: string,
+  executionContext?: z.infer<typeof executionContextSchema>
 ) {
   proofJobs.set(id, { ...proofJobs.get(id)!, status: "proving" });
   try {
     const proofDate = new Date();
     const decision = await evaluatePolicy({ policy, intent, spentToday, vaultBalance, now: proofDate });
+    const contractJournalDigest = executionContext ? await gatekeeperJournalDigest(executionContext) : decision.journalDigest;
+    const receiptJournalDigest = await sha256Hex(Buffer.from(contractJournalDigest.replace(/^0x/, ""), "hex"));
     const realProver = process.env.PAYGUARD_REAL_PROVER_CMD;
     const prover = realProver
-      ? await runExternalProver(realProver, { policy, intent, spentToday, vaultBalance, proofDate: proofDate.toISOString().slice(0, 10) })
+      ? await runExternalProver(realProver, { policy, intent, spentToday, vaultBalance, proofDate: proofDate.toISOString().slice(0, 10), executionContext })
       : null;
 
     if (prover) {
@@ -253,13 +279,16 @@ async function runProofJob(
       status: "complete",
       result: {
         ...(prover ?? decision),
+        contractJournalDigest: prover?.contractJournalDigest ?? contractJournalDigest,
+        receiptJournalDigest: prover?.receiptJournalDigest ?? receiptJournalDigest,
+        journalDigest: prover?.journalDigest ?? receiptJournalDigest,
         mode: prover?.mode ?? "dev-policy-evaluator",
         sealHex: prover?.sealHex ?? "dev-only-no-seal",
         imageId: prover?.imageId ?? process.env.PAYGUARD_RISC0_IMAGE_ID ?? "",
         receiptVerified: prover?.receiptVerified ?? false,
         warning: prover
-          ? "RISC Zero receipt was produced and verified off-chain. Stellar testnet uses the attestation-verifier contract until native BN254 verification lands."
-          : "Development evaluator only. Set PAYGUARD_REAL_PROVER_CMD=scripts/prove-risc0.sh for the real RISC Zero prover."
+          ? "RISC Zero Groth16 receipt was produced locally and is ready for the on-chain Stellar verifier."
+          : "Development evaluator only. Set PAYGUARD_REAL_PROVER_CMD=scripts/prove-risc0-groth16.sh for the real RISC Zero prover."
       }
     });
   } catch (error) {
@@ -316,12 +345,17 @@ function assertSameDecision(expected: Awaited<ReturnType<typeof evaluatePolicy>>
     ["approved", String(expected.approved), String(actual.approved)],
     ["violation", String(expected.violation), String(actual.violation)],
     ["policyHash", expected.policyHash, actual.policyHash],
-    ["intentDigest", expected.intentDigest, actual.intentDigest],
-    ["journalDigest", expected.journalDigest, actual.journalDigest]
+    ["intentDigest", expected.intentDigest, actual.intentDigest]
   ].filter(([, a, b]) => a !== b);
   if (mismatches.length > 0) {
     throw new Error(`RISC Zero prover output mismatch: ${mismatches.map(([key]) => key).join(", ")}`);
   }
+}
+
+async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  const input = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+  const digest = await crypto.subtle.digest("SHA-256", input);
+  return Buffer.from(digest).toString("hex");
 }
 
 app.listen(port, () => {

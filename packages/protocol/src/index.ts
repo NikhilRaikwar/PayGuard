@@ -31,6 +31,23 @@ export type Decision = {
   journalDigest: string;
 };
 
+export type GatekeeperJournalInput = {
+  networkHash: string;
+  policyId: string;
+  policyHash: string;
+  amount: bigint | string | number;
+  dayIndex: bigint | string | number;
+  spentBefore: bigint | string | number;
+  spentAfter: bigint | string | number;
+  vaultBefore: bigint | string | number;
+  vaultAfter: bigint | string | number;
+  nonce: bigint | string | number;
+  proofTimestamp: bigint | string | number;
+  approved: boolean;
+  violation: number;
+  intentDigest: string;
+};
+
 export enum ViolationCode {
   None = 0,
   MaxPayment = 1,
@@ -78,6 +95,61 @@ export function hexToBytes(hex: string): Uint8Array {
   const out = new Uint8Array(clean.length / 2);
   for (let i = 0; i < out.length; i++) out[i] = Number.parseInt(clean.slice(i * 2, i * 2 + 2), 16);
   return out;
+}
+
+export async function gatekeeperJournalDigest(journal: GatekeeperJournalInput): Promise<string> {
+  const chunks = [
+    fixedHexBytes(journal.networkHash, 32),
+    fixedHexBytes(journal.policyId, 32),
+    fixedHexBytes(journal.policyHash, 32),
+    signedBigIntBytes(journal.amount, 16),
+    unsignedBigIntBytes(journal.dayIndex, 8),
+    signedBigIntBytes(journal.spentBefore, 16),
+    signedBigIntBytes(journal.spentAfter, 16),
+    signedBigIntBytes(journal.vaultBefore, 16),
+    signedBigIntBytes(journal.vaultAfter, 16),
+    unsignedBigIntBytes(journal.nonce, 8),
+    unsignedBigIntBytes(journal.proofTimestamp, 8),
+    new Uint8Array([journal.approved ? 1 : 0]),
+    unsignedBigIntBytes(journal.violation, 4),
+    fixedHexBytes(journal.intentDigest, 32)
+  ];
+  const total = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return sha256Hex(bytes);
+}
+
+function fixedHexBytes(hex: string, length: number): Uint8Array {
+  const bytes = hexToBytes(hex);
+  if (bytes.length !== length) throw new Error(`Expected ${length} bytes, got ${bytes.length}.`);
+  return bytes;
+}
+
+function unsignedBigIntBytes(value: bigint | string | number, length: number): Uint8Array {
+  let n = BigInt(value);
+  if (n < 0n) throw new Error("Unsigned integer cannot be negative.");
+  const out = new Uint8Array(length);
+  for (let i = length - 1; i >= 0; i--) {
+    out[i] = Number(n & 0xffn);
+    n >>= 8n;
+  }
+  if (n !== 0n) throw new Error(`Integer does not fit in ${length} bytes.`);
+  return out;
+}
+
+function signedBigIntBytes(value: bigint | string | number, length: number): Uint8Array {
+  let n = BigInt(value);
+  const bits = BigInt(length * 8);
+  const min = -(1n << (bits - 1n));
+  const max = (1n << (bits - 1n)) - 1n;
+  if (n < min || n > max) throw new Error(`Signed integer does not fit in ${length} bytes.`);
+  if (n < 0n) n = (1n << bits) + n;
+  return unsignedBigIntBytes(n, length);
 }
 
 export function canonicalPolicy(policy: PolicyDefinition): string {

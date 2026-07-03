@@ -24,6 +24,7 @@ import {
 import {
   evaluatePolicy,
   formatUsdc,
+  gatekeeperJournalDigest,
   hashPolicy,
   isLikelyStellarAddress,
   parseUsdc,
@@ -438,7 +439,7 @@ function Landing({ connect, connecting }: { connect: () => void; connecting: boo
           </div>
           <div className="hero-trust" style={{ display: "flex", gap: "16px", flexWrap: "nowrap", whiteSpace: "nowrap" }}>
             <Trust text="RISC Zero zkVM" />
-            <Trust text="Groth16 ZK (CAP-0059)" />
+            <Trust text="RISC Zero Groth16 (BN254)" />
             <Trust text="Soroban Gatekeeper" />
           </div>
         </div>
@@ -834,7 +835,7 @@ function Dashboard({
       <div className="card-header">
         <span className="card-title">Quick actions</span>
         <span className={`sc-badge ${api.realProverConfigured ? "green" : "amber"}`}>
-          {api.realProverConfigured ? "RISC Zero live" : "Dev prover"}
+          {api.realProverConfigured ? "RISC Zero Groth16 live" : "Dev evaluator"}
         </span>
       </div>
       <div className="quick-grid">
@@ -1117,10 +1118,98 @@ function AgentConsole({
     if (!intent || !policy) return;
     setBusy(true); setProof(null); setStep(2);
     try {
+      let pendingExecution: {
+        policyId: string;
+        journal: Parameters<typeof executeDecision>[0]["journal"];
+        executionContext: {
+          networkHash: string;
+          policyId: string;
+          policyHash: string;
+          amount: string;
+          dayIndex: string;
+          spentBefore: string;
+          spentAfter: string;
+          vaultBefore: string;
+          vaultAfter: string;
+          nonce: string;
+          proofTimestamp: string;
+          approved: boolean;
+          violation: number;
+          intentDigest: string;
+        };
+      } | null = null;
+
+      const decision = await evaluatePolicy({ policy, intent, spentToday, vaultBalance });
+      if (wallet && env.contractId) {
+        const policyId = await computePolicyId(policyHash, policy.salt);
+        const network_hash = await getNetworkHash();
+        const tokenAddress = env.tokenContractId || "CDLZFC3SYJYD5765ZP65CH3N4ZPP7QCQPVEAW57KYN22A2KU2C64VUT7";
+
+        let nonce = 0n;
+        try {
+          const contractPolicy = await getPolicyState(policyId);
+          nonce = BigInt(contractPolicy.nonce);
+        } catch {
+          // Local preview can still generate a proof, but live execution needs contract state.
+        }
+
+        const amountBig = parseUsdc(intent.amount);
+        const spentBeforeBig = parseUsdc(spentToday);
+        const vaultBeforeBig = parseUsdc(vaultBalance);
+        const approved = decision.approved;
+        const violation = decision.violation;
+        const spentAfterBig = approved ? spentBeforeBig + amountBig : spentBeforeBig;
+        const vaultAfterBig = approved ? vaultBeforeBig - amountBig : vaultBeforeBig;
+        const dayIndex = BigInt(Math.floor(Date.now() / 1000 / 86400));
+        const proofTimestamp = BigInt(Math.floor(Date.now() / 1000));
+
+        pendingExecution = {
+          policyId,
+          journal: {
+            network_hash,
+            gatekeeper: env.contractId,
+            policy_id: policyId,
+            policy_hash: policyHash,
+            token: tokenAddress,
+            executor: wallet.address,
+            recipient: intent.recipient,
+            amount: amountBig,
+            day_index: dayIndex,
+            spent_before: spentBeforeBig,
+            spent_after: spentAfterBig,
+            vault_before: vaultBeforeBig,
+            vault_after: vaultAfterBig,
+            nonce,
+            proof_timestamp: proofTimestamp,
+            approved,
+            violation,
+            intent_digest: decision.intentDigest
+          },
+          executionContext: {
+            networkHash: network_hash,
+            policyId,
+            policyHash,
+            amount: amountBig.toString(),
+            dayIndex: dayIndex.toString(),
+            spentBefore: spentBeforeBig.toString(),
+            spentAfter: spentAfterBig.toString(),
+            vaultBefore: vaultBeforeBig.toString(),
+            vaultAfter: vaultAfterBig.toString(),
+            nonce: nonce.toString(),
+            proofTimestamp: proofTimestamp.toString(),
+            approved,
+            violation,
+            intentDigest: decision.intentDigest
+          }
+        };
+
+        await gatekeeperJournalDigest(pendingExecution.executionContext);
+      }
+
       const job = await fetch(`${env.apiUrl}/v1/proofs`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ policy, intent, spentToday, vaultBalance })
+        body: JSON.stringify({ policy, intent, spentToday, vaultBalance, executionContext: pendingExecution?.executionContext })
       }).then((r) => r.json());
       setStep(3);
       let finalJob = job;
@@ -1136,65 +1225,21 @@ function AgentConsole({
       const status = result.approved ? "VERIFIED" : "BLOCKED";
 
       let txHash = "";
-      if (wallet && env.contractId) {
+      if (wallet && env.contractId && pendingExecution) {
         notify("Submitting decision proof to Soroban contract...", "info");
         try {
-          const policyId = await computePolicyId(policyHash, policy.salt);
-          const network_hash = await getNetworkHash();
-          const tokenAddress = env.tokenContractId || "CDLZFC3SYJYD5765ZP65CH3N4ZPP7QCQPVEAW57KYN22A2KU2C64VUT7";
-
-          let nonce = 0n;
-          try {
-            const contractPolicy = await getPolicyState(policyId);
-            nonce = BigInt(contractPolicy.nonce);
-          } catch {
-            // fallback
-          }
-
-          const amountBig = parseUsdc(intent.amount);
-          const spentBeforeBig = parseUsdc(spentToday);
-          const vaultBeforeBig = parseUsdc(vaultBalance);
-
-          const approved = result.approved;
-          const violation = result.violation;
-
-          const spentAfterBig = approved ? spentBeforeBig + amountBig : spentBeforeBig;
-          const vaultAfterBig = approved ? vaultBeforeBig - amountBig : vaultBeforeBig;
-
-          const dayIndex = BigInt(Math.floor(Date.now() / 1000 / 86400));
-          const proofTimestamp = BigInt(Math.floor(Date.now() / 1000));
-
           const txRes = await executeDecision({
             source: wallet.address,
             contractId: env.contractId,
-            policyId,
+            policyId: pendingExecution.policyId,
             sealHex: result.sealHex,
-            journal: {
-              network_hash,
-              gatekeeper: env.contractId,
-              policy_id: policyId,
-              policy_hash: policyHash,
-              token: tokenAddress,
-              executor: wallet.address,
-              recipient: intent.recipient,
-              amount: amountBig,
-              day_index: dayIndex,
-              spent_before: spentBeforeBig,
-              spent_after: spentAfterBig,
-              vault_before: vaultBeforeBig,
-              vault_after: vaultAfterBig,
-              nonce: nonce,
-              proof_timestamp: proofTimestamp,
-              approved,
-              violation,
-              intent_digest: result.intentDigest
-            }
+            journal: pendingExecution.journal
           });
           txHash = txRes.hash;
-          notify(approved ? "Payment executed on Stellar testnet!" : "Verified denial recorded on Stellar testnet!", "success");
+          notify(pendingExecution.journal.approved ? "Payment executed on Stellar testnet!" : "Verified denial recorded on Stellar testnet!", "success");
 
           // Reload from contract
-          const updatedState = await getPolicyState(policyId);
+          const updatedState = await getPolicyState(pendingExecution.policyId);
           if (updatedState) {
             setVaultBalance(formatUsdc(BigInt(updatedState.vault_balance)));
             setSpentToday(formatUsdc(BigInt(updatedState.spent)));
@@ -1477,5 +1522,5 @@ function ProofLog({ events, notify }: { events: EventRow[]; notify: (m: string) 
 }
 
 function Settings({ wallet, disconnect, health, api }: { wallet: { address: string; network: string } | null; disconnect: () => void; health: { ok: boolean; status: string; ledger: number | null }; api: ApiStatus }) {
-  return <div className="settings-col"><section className="card"><div className="card-header"><span className="card-title">Wallet and network</span></div><div className="card-body"><div className="settings-row"><span><b>Connected wallet</b><small>{wallet ? `${shortAddress(wallet.address)} (Freighter)` : "connect from the wallet overlay"}</small></span>{wallet && <button className="btn-sm danger" onClick={disconnect}>Disconnect</button>}</div><div className="settings-row"><span><b>Network</b><small>{env.network}</small></span><span className="sc-badge green">Testnet</span></div><div className="settings-row"><span><b>RPC</b><small>{health.ledger ? `ledger ${health.ledger}` : health.status}</small></span><span className={`sc-badge ${health.ok ? "green" : "red"}`}>{health.status}</span></div><div className="settings-row"><span><b>OpenAI API</b><small>{api.openai ? "server key configured" : "deterministic fallback active"}</small></span><span className={`sc-badge ${api.openai ? "green" : "amber"}`}>{api.openai ? "Live" : "Fallback"}</span></div></div></section><section className="card"><div className="card-header"><span className="card-title">Contracts</span></div><div className="card-body"><div className="settings-row"><span><b>PayGuard Gatekeeper</b><small><a className="td-link" href={contractLink(api.contractId)} target="_blank" rel="noreferrer">{api.contractId || "not configured"}</a></small></span></div><div className="settings-row"><span><b>Attestation verifier</b><small><a className="td-link" href={contractLink(api.verifierContractId)} target="_blank" rel="noreferrer">{api.verifierContractId || "not configured"}</a></small></span></div><div className="settings-row"><span><b>RISC Zero image</b><small>{env.risc0ImageId || "not configured"}</small></span><span className={`sc-badge ${api.realProverConfigured ? "green" : "amber"}`}>{api.realProverConfigured ? "Prover" : "Env"}</span></div><div className="settings-row"><span><b>Token contract</b><small>{api.tokenContractId || "not configured"}</small></span></div></div></section></div>;
+  return <div className="settings-col"><section className="card"><div className="card-header"><span className="card-title">Wallet and network</span></div><div className="card-body"><div className="settings-row"><span><b>Connected wallet</b><small>{wallet ? `${shortAddress(wallet.address)} (Freighter)` : "connect from the wallet overlay"}</small></span>{wallet && <button className="btn-sm danger" onClick={disconnect}>Disconnect</button>}</div><div className="settings-row"><span><b>Network</b><small>{env.network}</small></span><span className="sc-badge green">Testnet</span></div><div className="settings-row"><span><b>RPC</b><small>{health.ledger ? `ledger ${health.ledger}` : health.status}</small></span><span className={`sc-badge ${health.ok ? "green" : "red"}`}>{health.status}</span></div><div className="settings-row"><span><b>OpenAI API</b><small>{api.openai ? "server key configured" : "deterministic fallback active"}</small></span><span className={`sc-badge ${api.openai ? "green" : "amber"}`}>{api.openai ? "Live" : "Fallback"}</span></div></div></section><section className="card"><div className="card-header"><span className="card-title">Contracts</span></div><div className="card-body"><div className="settings-row"><span><b>PayGuard Gatekeeper</b><small><a className="td-link" href={contractLink(api.contractId)} target="_blank" rel="noreferrer">{api.contractId || "not configured"}</a></small></span></div><div className="settings-row"><span><b>RISC Zero Groth16 verifier</b><small><a className="td-link" href={contractLink(api.verifierContractId)} target="_blank" rel="noreferrer">{api.verifierContractId || "not configured"}</a></small></span></div><div className="settings-row"><span><b>RISC Zero image</b><small>{env.risc0ImageId || "not configured"}</small></span><span className={`sc-badge ${api.realProverConfigured ? "green" : "amber"}`}>{api.realProverConfigured ? "Groth16" : "Env"}</span></div><div className="settings-row"><span><b>Token contract</b><small>{api.tokenContractId || "not configured"}</small></span></div></div></section></div>;
 }
