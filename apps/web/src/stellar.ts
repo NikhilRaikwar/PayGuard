@@ -193,7 +193,7 @@ export function buildJournalScVal(journal: {
     }),
     new StellarSdk.xdr.ScMapEntry({
       key: StellarSdk.nativeToScVal("approved", { type: "symbol" }),
-      val: StellarSdk.nativeToScVal(journal.approved, { type: "bool" })
+      val: StellarSdk.nativeToScVal(journal.approved, { type: "boolean" })
     }),
     new StellarSdk.xdr.ScMapEntry({
       key: StellarSdk.nativeToScVal("day_index", { type: "symbol" }),
